@@ -1,0 +1,44 @@
+[
+  {
+    "name": "001_passport_seller",
+    "document_type": "seller_passport",
+    "file": "training_examples/001_passport_seller/passport.jpg",
+    "expected": {
+      "seller_full_name": "",
+      "seller_birth_date": "",
+      "seller_passport": "",
+      "seller_passport_issue_date": "",
+      "seller_passport_issued_by": "",
+      "seller_address": ""
+    }
+  },
+  {
+    "name": "002_sts_vehicle",
+    "document_type": "sts",
+    "file": "training_examples/002_sts_vehicle/sts.jpg",
+    "expected": {
+      "vehicle_make_model": "",
+      "vehicle_type": "",
+      "vehicle_year": "",
+      "vin": "",
+      "body_number": "",
+      "color": "",
+      "registration_plate": "",
+      "sts_series_number": ""
+    }
+  },
+  {
+    "name": "003_pts_vehicle",
+    "document_type": "pts",
+    "file": "training_examples/003_pts_vehicle/pts.jpg",
+    "expected": {
+      "vehicle_make_model": "",
+      "vehicle_type": "",
+      "vehicle_year": "",
+      "vin": "",
+      "body_number": "",
+      "color": "",
+      "pts_series_number": ""
+    }
+  }
+]

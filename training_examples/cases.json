@@ -1,0 +1,101 @@
+[
+  {
+    "name": "001_passport_kirillina",
+    "document_type": "seller_passport",
+    "files": [
+      "training_examples/001_passport_seller/passport (1-1).jpg",
+      "training_examples/001_passport_seller/passport (1-2).jpg"
+    ],
+    "expected": {
+      "seller_full_name": "Кириллина Мария Прокопьевна",
+      "seller_birth_date": "09.07.1956",
+      "seller_passport": "9805 998921",
+      "seller_passport_issue_date": "03.10.2006",
+      "seller_passport_issued_by": "ЖИГАНСКИМ ОВД РЕСПУБЛИКИ САХА (ЯКУТИЯ)",
+      "seller_address": "с. Жиганск, ул. Молодежная, д.15, кв.12"
+    }
+  },
+  {
+    "name": "002_passport_vinokurova",
+    "document_type": "seller_passport",
+    "files": [
+      "training_examples/001_passport_seller/passport (2-1).jpg",
+      "training_examples/001_passport_seller/passport (2-2).jpg"
+    ],
+    "expected": {
+      "seller_full_name": "Винокурова Светлана Александровна",
+      "seller_birth_date": "01.06.1988",
+      "seller_passport": "9814 583795",
+      "seller_passport_issue_date": "17.09.2015",
+      "seller_passport_issued_by": "МП УФМС РОССИИ ПО РЕСПУБЛИКЕ САХА (ЯКУТИЯ) В ЖИГАНСКОМ РАЙОНЕ",
+      "seller_address": "г. Якутск, ул. Автодорожная, д.13, к.1, кв.30"
+    }
+  },
+  {
+    "name": "003_sts_honda_stepwgn",
+    "document_type": "sts",
+    "files": [
+      "training_examples/002_sts_vehicle/sts (1-1).jpg",
+      "training_examples/002_sts_vehicle/sts (1-2).jpg"
+    ],
+    "expected": {
+      "vehicle_make_model": "HONDA STEPWGN SPADA",
+      "vehicle_type": "B/M1",
+      "vehicle_year": "2017",
+      "body_number": "RP3-1204104",
+      "color": "Белый",
+      "registration_plate": "В527НУ14",
+      "sts_series_number": "9976 412649"
+    }
+  },
+  {
+    "name": "004_sts_toyota_wish",
+    "document_type": "sts",
+    "files": [
+      "training_examples/002_sts_vehicle/sts (2-1).jpg",
+      "training_examples/002_sts_vehicle/sts (2-2).jpg"
+    ],
+    "expected": {
+      "vehicle_make_model": "TOYOTA WISH",
+      "vehicle_type": "B/M1",
+      "vehicle_year": "2006",
+      "body_number": "ZNE100327899",
+      "color": "Серый",
+      "registration_plate": "Е039НМ14",
+      "sts_series_number": "9973 602557"
+    }
+  },
+  {
+    "name": "005_pts_land_cruiser",
+    "document_type": "pts",
+    "files": [
+      "training_examples/003_pts_vehicle/pts (1-1).jpg",
+      "training_examples/003_pts_vehicle/pts (1-2).jpg"
+    ],
+    "expected": {
+      "vehicle_make_model": "TOYOTA LAND CRUISER 200",
+      "vehicle_type": "B",
+      "vehicle_year": "2008",
+      "vin": "JTMHT05J005009117",
+      "body_number": "JTMHT05J005009117",
+      "color": "Черный",
+      "pts_series_number": "25ОК 951091"
+    }
+  },
+  {
+    "name": "006_pts_toyota_wish",
+    "document_type": "pts",
+    "files": [
+      "training_examples/003_pts_vehicle/pts (2-1).jpg"
+    ],
+    "expected": {
+      "vehicle_make_model": "TOYOTA WISH",
+      "vehicle_type": "B",
+      "vehicle_year": "2006",
+      "body_number": "ZNE10-0327899",
+      "color": "Серый",
+      "pts_series_number": "25УМ 874865"
+    }
+  }
+]
+

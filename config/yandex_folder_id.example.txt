@@ -1,0 +1,1 @@
+Вставьте сюда folder_id из Yandex Cloud и переименуйте файл в yandex_folder_id.txt
