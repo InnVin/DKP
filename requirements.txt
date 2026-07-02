@@ -1,0 +1,8 @@
+fastapi==0.115.12
+uvicorn[standard]==0.34.3
+python-multipart==0.0.20
+openpyxl==3.1.5
+pillow==11.2.1
+pytesseract==0.3.13
+# Дополнительно при доступном интернете: paddleocr и paddlepaddle.
+# Базовый русский OCR работает через встроенный Windows.Media.Ocr.

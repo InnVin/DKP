@@ -1,0 +1,1 @@
+Вставьте сюда Gemini API key и переименуйте файл в gemini_api_key.txt

@@ -1,0 +1,176 @@
+﻿<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>АвтоДоговор</title>
+  <link rel="stylesheet" href="/static/styles.css?v=20260701-1">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <span class="eyebrow">Локально на вашем компьютере</span>
+      <h1>АвтоДоговор</h1>
+    </div>
+    <div class="top-actions">
+      <button id="sidebarToggle" class="icon-button" type="button" title="Свернуть архив" aria-label="Свернуть архив"><span></span></button>
+      <button id="reprocessDeal" class="icon-button recognize-top" type="button" title="Распознать документы заново" aria-label="Распознать документы заново">↻</button>
+      <button id="newDeal" class="button secondary">Новый ДКП</button>
+      <button id="saveDeal" class="button primary">Сохранить</button>
+      <button id="makeContract" class="button accent">Создать Excel</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-title">
+        <h2>Архив</h2>
+        <span id="dealBadge" class="badge">Новая</span>
+      </div>
+      <input id="archiveSearch" class="search" placeholder="VIN, кузов, СТС, госномер, продавец, покупатель">
+      <div id="archiveList" class="archive-list"></div>
+    </aside>
+
+    <section class="workspace">
+      <div id="message" class="message hidden"></div>
+
+      <section class="readiness-panel" aria-label="Готовность договора">
+        <div>
+          <span class="eyebrow">Контроль заполнения</span>
+          <h2 id="readinessTitle">Договор пока не заполнен</h2>
+          <p id="readinessHint">Загрузите документы или заполните поля вручную. Подсказка покажет, чего не хватает для Excel.</p>
+        </div>
+        <div class="readiness-score">
+          <strong id="readinessPercent">0%</strong>
+          <span>готово</span>
+        </div>
+        <div id="readinessChecks" class="readiness-checks"></div>
+      </section>
+
+      <section class="upload-panel">
+        <div>
+          <span class="eyebrow">Документы</span>
+          <h2>Загрузите документы</h2>
+          <p>Добавляйте файлы в нужную графу. Yandex OCR запускается для jpg, png и PDF; остальные форматы сохраняются как вложения.</p>
+        </div>
+        <div id="uploadGrid" class="upload-grid">
+          <label class="upload-tile" data-type="seller_passport">
+            <span>Паспорт продавца <em>загрузить файл</em></span>
+            <small>Разворот и прописка</small>
+            <input type="file" data-document-type="seller_passport" accept=".jpg,.jpeg,.png,.webp,.heic,.bmp,.tif,.tiff,.psd,.pdf,.xls,.xlsx,.doc,.docx,.ppt,.pptx" multiple>
+          </label>
+          <label class="upload-tile" data-type="buyer_passport">
+            <span>Паспорт покупателя <em>загрузить файл</em></span>
+            <small>Разворот и прописка</small>
+            <input type="file" data-document-type="buyer_passport" accept=".jpg,.jpeg,.png,.webp,.heic,.bmp,.tif,.tiff,.psd,.pdf,.xls,.xlsx,.doc,.docx,.ppt,.pptx" multiple>
+          </label>
+          <label class="upload-tile" data-type="pts">
+            <span>ПТС <em>загрузить файл</em></span>
+            <small>Все нужные страницы</small>
+            <input type="file" data-document-type="pts" accept=".jpg,.jpeg,.png,.webp,.heic,.bmp,.tif,.tiff,.psd,.pdf,.xls,.xlsx,.doc,.docx,.ppt,.pptx" multiple>
+          </label>
+          <label class="upload-tile" data-type="sts">
+            <span>СТС <em>загрузить файл</em></span>
+            <small>Обе стороны</small>
+            <input type="file" data-document-type="sts" accept=".jpg,.jpeg,.png,.webp,.heic,.bmp,.tif,.tiff,.psd,.pdf,.xls,.xlsx,.doc,.docx,.ppt,.pptx" multiple>
+          </label>
+          <label class="upload-tile" data-type="old_contract">
+            <span>Старый ДКП <em>загрузить файл</em></span>
+            <small>Печатный или рукописный</small>
+            <input type="file" data-document-type="old_contract" accept=".jpg,.jpeg,.png,.webp,.heic,.bmp,.tif,.tiff,.psd,.pdf,.xls,.xlsx,.doc,.docx,.ppt,.pptx" multiple>
+          </label>
+          <label class="upload-tile" data-type="other">
+            <span>Прочее <em>загрузить файл</em></span>
+            <small>Любые вложения</small>
+            <input type="file" data-document-type="other" accept=".jpg,.jpeg,.png,.webp,.heic,.bmp,.tif,.tiff,.psd,.pdf,.xls,.xlsx,.doc,.docx,.ppt,.pptx" multiple>
+          </label>
+        </div>
+        <div id="documentList" class="document-list"></div>
+      </section>
+
+      <form id="dealForm">
+        <section class="card">
+          <div class="section-heading">
+            <span class="step">2</span>
+            <div><h2>Договор</h2><p>Общие данные сделки</p></div>
+          </div>
+          <div class="grid three">
+            <label>Дата договора<input name="contract_date" type="date"></label>
+            <label>Место составления<input name="contract_place"></label>
+            <label>Стоимость, руб.<input name="price" inputmode="decimal"></label>
+          </div>
+        </section>
+
+        <div class="columns">
+          <section class="card">
+            <div class="section-heading">
+              <span class="step">3</span>
+              <div><h2>Продавец</h2><p>Данные владельца автомобиля</p></div>
+            </div>
+            <div class="grid">
+              <label class="wide">ФИО<input name="seller_full_name"></label>
+              <label>Дата рождения<input name="seller_birth_date"></label>
+              <label>Телефон<input name="seller_phone"></label>
+              <label>Паспорт<input name="seller_passport"></label>
+              <label>Дата выдачи<input name="seller_passport_issue_date"></label>
+              <label class="wide">Кем выдан<textarea name="seller_passport_issued_by"></textarea></label>
+              <label class="wide">Адрес<textarea name="seller_address"></textarea></label>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="section-heading">
+              <span class="step">4</span>
+              <div><h2>Покупатель</h2><p>Данные нового владельца</p></div>
+            </div>
+            <div class="grid">
+              <label class="wide">ФИО<input name="buyer_full_name"></label>
+              <label>Дата рождения<input name="buyer_birth_date"></label>
+              <label>Телефон<input name="buyer_phone"></label>
+              <label>Паспорт<input name="buyer_passport"></label>
+              <label>Дата выдачи<input name="buyer_passport_issue_date"></label>
+              <label class="wide">Кем выдан<textarea name="buyer_passport_issued_by"></textarea></label>
+              <label class="wide">Адрес<textarea name="buyer_address"></textarea></label>
+            </div>
+          </section>
+        </div>
+
+        <section class="card">
+          <div class="section-heading">
+            <span class="step">5</span>
+            <div><h2>Автомобиль</h2><p>Сверьте особенно VIN и номера документов</p></div>
+          </div>
+          <div class="grid three">
+            <label class="wide">Марка и модель<input name="vehicle_make_model"></label>
+            <label>Тип ТС<input name="vehicle_type"></label>
+            <label>Год выпуска<input name="vehicle_year"></label>
+            <label>VIN<input name="vin" maxlength="17"></label>
+            <label>Номер кузова<input name="body_number"></label>
+            <label>Номер шасси<input name="chassis_number"></label>
+            <label>Цвет<input name="color"></label>
+            <label>Госномер<input name="registration_plate"></label>
+            <label>ПТС<input name="pts_series_number"></label>
+            <label>СТС<input name="sts_series_number"></label>
+          </div>
+        </section>
+
+        <section class="card notes-card">
+          <div class="section-heading">
+            <span class="step">!</span>
+            <div><h2>Заметки распознавания</h2><p>Это поле хранится в архиве, но никогда не печатается в договоре</p></div>
+          </div>
+          <div class="notes-grid">
+            <label>Продавец<textarea name="seller_notes" rows="6"></textarea></label>
+            <label>Покупатель<textarea name="buyer_notes" rows="6"></textarea></label>
+            <label>Автомобиль<textarea name="vehicle_notes" rows="6"></textarea></label>
+          </div>
+          <textarea name="notes" class="legacy-notes" rows="1" aria-hidden="true"></textarea>
+        </section>
+      </form>
+    </section>
+  </main>
+
+  <script src="/static/app.js?v=20260701-1"></script>
+</body>
+</html>
+
