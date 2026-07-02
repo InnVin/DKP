@@ -1,10 +1,10 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="ru">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>АвтоДоговор</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20260701-1">
+  <link rel="stylesheet" href="/static/styles.css?v=20260626-3">
 </head>
 <body>
   <header class="topbar">
@@ -13,8 +13,6 @@
       <h1>АвтоДоговор</h1>
     </div>
     <div class="top-actions">
-      <button id="sidebarToggle" class="icon-button" type="button" title="Свернуть архив" aria-label="Свернуть архив"><span></span></button>
-      <button id="reprocessDeal" class="icon-button recognize-top" type="button" title="Распознать документы заново" aria-label="Распознать документы заново">↻</button>
       <button id="newDeal" class="button secondary">Новый ДКП</button>
       <button id="saveDeal" class="button primary">Сохранить</button>
       <button id="makeContract" class="button accent">Создать Excel</button>
@@ -53,6 +51,7 @@
           <h2>Загрузите документы</h2>
           <p>Добавляйте файлы в нужную графу. Yandex OCR запускается для jpg, png и PDF; остальные форматы сохраняются как вложения.</p>
         </div>
+        <button id="reprocessDeal" class="button secondary ocr-button" type="button">Распознать</button>
         <div id="uploadGrid" class="upload-grid">
           <label class="upload-tile" data-type="seller_passport">
             <span>Паспорт продавца <em>загрузить файл</em></span>
@@ -170,7 +169,6 @@
     </section>
   </main>
 
-  <script src="/static/app.js?v=20260701-1"></script>
+  <script src="/static/app.js?v=20260626-3"></script>
 </body>
 </html>
-

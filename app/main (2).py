@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import shutil
 import uuid
@@ -17,7 +17,6 @@ from .excel_service import create_contract
 from .gemini_ocr import can_process as gemini_can_process
 from .gemini_ocr import recognize_files as gemini_recognize_files
 from .gemini_ocr import status as gemini_status
-from .hybrid_ocr import recognize_files as hybrid_recognize_files
 from .ocr import normalize_fields, recognize
 from .yandex_ocr import can_process as yandex_can_process
 from .yandex_ocr import recognize_files as yandex_recognize_files
@@ -142,46 +141,19 @@ async def upload_document(
     stored = folder / f"{uuid.uuid4().hex}{suffix}"
     with stored.open("wb") as destination:
         shutil.copyfileobj(file.file, destination)
-    if gemini_can_process(stored):
-        existing_paths = [
-            Path(document["stored_path"])
-            for document in database.get_deal_documents(deal_id)
-            if document["document_type"] == document_type and Path(document["stored_path"]).exists() and gemini_can_process(Path(document["stored_path"]))
-        ]
-        group_paths = [*existing_paths, stored]
+
+    yandex = yandex_status()
+    gemini = gemini_status()
+    if yandex_can_process(stored) and yandex.get("configured"):
         try:
-            ai_result = hybrid_recognize_files(group_paths, document_type)
+            ai_result = yandex_recognize_files([stored], document_type)
             result = {
-                "status": ai_result.get("engine", "yandex_gemini"),
+                "status": "ok",
                 "fields": ai_result.get("fields", {}),
                 "field_meta": ai_result.get("field_meta", {}),
                 "text": ai_result.get("text", ""),
                 "note": "\n".join(ai_result.get("warnings", [])),
                 "detected_type": ai_result.get("document_type", document_type),
-                "effective_type": document_type,
-                "pages": len(group_paths),
-            }
-        except RuntimeError as exc:
-            result = {
-                "status": "waiting_gemini",
-                "fields": {},
-                "field_meta": {},
-                "text": "",
-                "note": f"Файл сохранён, но точное распознавание Yandex+Gemini не сработало: {exc}",
-                "detected_type": document_type,
-                "effective_type": document_type,
-                "pages": 1,
-            }
-    elif yandex_can_process(stored) and yandex_status().get("configured"):
-        try:
-            ai_result = yandex_recognize_files([stored], document_type)
-            result = {
-                "status": "yandex_text_only",
-                "fields": {},
-                "field_meta": {},
-                "text": ai_result.get("text", ""),
-                "note": "Файл сохранён. Для заполнения полей нужен Gemini API key; Yandex OCR сохранил только сырой текст.",
-                "detected_type": document_type,
                 "effective_type": document_type,
                 "pages": 1,
             }
@@ -196,13 +168,62 @@ async def upload_document(
                 "effective_type": document_type,
                 "pages": 1,
             }
+    elif gemini_can_process(stored) and gemini.get("configured"):
+        try:
+            ai_result = gemini_recognize_files([stored], document_type)
+            result = {
+                "status": "ok",
+                "fields": ai_result.get("fields", {}),
+                "field_meta": ai_result.get("field_meta", {}),
+                "text": "",
+                "note": "\n".join(ai_result.get("warnings", [])),
+                "detected_type": ai_result.get("document_type", document_type),
+                "effective_type": document_type,
+                "pages": 1,
+            }
+        except RuntimeError as exc:
+            result = {
+                "status": "waiting_ai",
+                "fields": {},
+                "field_meta": {},
+                "text": "",
+                "note": f"Файл сохранён, но Gemini OCR не сработал: {exc}",
+                "detected_type": document_type,
+                "effective_type": document_type,
+                "pages": 1,
+            }
+    elif suffix not in {".pdf", ".heic", ".psd", ".xls", ".xlsx", ".doc", ".docx", ".ppt", ".pptx"}:
+        engine = ai_status()
+        if engine.get("available") and engine.get("installed"):
+            ai_result = recognize_images([stored], document_type)
+            result = {
+                "status": "ok",
+                "fields": ai_result.get("fields", {}),
+                "field_meta": ai_result.get("field_meta", {}),
+                "text": "",
+                "note": "\n".join(ai_result.get("warnings", [])),
+                "detected_type": ai_result.get("document_type", document_type),
+                "effective_type": document_type,
+                "pages": 1,
+            }
+        else:
+            result = {
+                "status": "waiting_ai",
+                "fields": {},
+                "field_meta": {},
+                "text": "",
+                "note": "Документ сохранён. Для распознавания настройте Yandex OCR, Gemini API или локальный ИИ.",
+                "detected_type": document_type,
+                "effective_type": document_type,
+                "pages": 1,
+            }
     else:
         result = {
             "status": "stored",
             "fields": {},
             "field_meta": {},
             "text": "",
-            "note": "Файл сохранён как вложение. Для точного распознавания нужны изображения/PDF и Gemini API key.",
+            "note": "Файл сохранён как вложение. Yandex OCR работает с jpg, jpeg, png и pdf; Gemini дополнительно может обработать другие изображения/PDF.",
             "detected_type": document_type,
             "effective_type": document_type,
             "pages": 1,
@@ -258,9 +279,92 @@ def reprocess_documents(deal_id: int) -> dict[str, Any]:
     if not deal:
         raise HTTPException(404, "Сделка не найдена")
     documents = database.get_deal_documents(deal_id)
-    if not documents:
-        return {"processed": 0, "fields": {}, "field_meta": {}, "notes": "Нет загруженных документов.", "notes_by_group": _notes_by_group(["Нет загруженных документов."])}
+    yandex = yandex_status()
+    if yandex.get("configured"):
+        combined_fields: dict[str, str] = {}
+        combined_meta: dict[str, dict[str, Any]] = {}
+        notes: list[str] = []
+        processed = 0
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for document in documents:
+            grouped.setdefault(document["document_type"], []).append(document)
+        for document_type, group in grouped.items():
+            ocr_documents = [
+                document
+                for document in group
+                if Path(document["stored_path"]).exists() and yandex_can_process(Path(document["stored_path"]))
+            ]
+            if not ocr_documents:
+                notes.append(f"{document_type}: нет файлов для Yandex OCR.")
+                continue
+            try:
+                result = yandex_recognize_files(
+                    [Path(document["stored_path"]) for document in ocr_documents],
+                    document_type,
+                )
+            except RuntimeError as exc:
+                notes.append(f"{document_type}: Yandex OCR не сработал: {exc}")
+                continue
+            combined_fields.update(result.get("fields", {}))
+            combined_meta.update(result.get("field_meta", {}))
+            notes.extend(result.get("warnings", []))
+            for document in ocr_documents:
+                database.update_document_ocr(document["id"], result.get("text", ""), "yandex_processed")
+                processed += 1
+        return {
+            "processed": processed,
+            "fields": normalize_fields(combined_fields),
+            "field_meta": combined_meta,
+            "notes": "\n\n".join(notes),
+            "notes_by_group": _notes_by_group(notes),
+        }
 
+    gemini = gemini_status()
+    if gemini.get("configured"):
+        combined_fields: dict[str, str] = {}
+        combined_meta: dict[str, dict[str, Any]] = {}
+        notes: list[str] = []
+        processed = 0
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for document in documents:
+            grouped.setdefault(document["document_type"], []).append(document)
+        for document_type, group in grouped.items():
+            ocr_documents = [
+                document
+                for document in group
+                if Path(document["stored_path"]).exists() and gemini_can_process(Path(document["stored_path"]))
+            ]
+            if not ocr_documents:
+                notes.append(f"{document_type}: нет файлов для OCR, сохранены как вложения.")
+                continue
+            try:
+                result = gemini_recognize_files(
+                    [Path(document["stored_path"]) for document in ocr_documents],
+                    document_type,
+                )
+            except RuntimeError as exc:
+                notes.append(f"{document_type}: Gemini OCR не сработал: {exc}")
+                continue
+            combined_fields.update(result.get("fields", {}))
+            combined_meta.update(result.get("field_meta", {}))
+            notes.extend(result.get("warnings", []))
+            for document in ocr_documents:
+                database.update_document_ocr(document["id"], "", "gemini_processed")
+                processed += 1
+        return {
+            "processed": processed,
+            "fields": normalize_fields(combined_fields),
+            "field_meta": combined_meta,
+            "notes": "\n\n".join(notes),
+            "notes_by_group": _notes_by_group(notes),
+        }
+
+    engine = ai_status()
+    if not engine.get("available") or not engine.get("installed"):
+        raise HTTPException(
+            503,
+            "OCR не готов. Укажите Yandex API key в config/yandex_api_key.txt, Gemini API key в config/gemini_api_key.txt или запустите локальный ИИ.",
+        )
     combined_fields: dict[str, str] = {}
     combined_meta: dict[str, dict[str, Any]] = {}
     notes: list[str] = []
@@ -268,41 +372,34 @@ def reprocess_documents(deal_id: int) -> dict[str, Any]:
     grouped: dict[str, list[dict[str, Any]]] = {}
     for document in documents:
         grouped.setdefault(document["document_type"], []).append(document)
-
     for document_type, group in grouped.items():
-        ocr_documents = [
+        image_documents = [
             document
             for document in group
-            if Path(document["stored_path"]).exists() and gemini_can_process(Path(document["stored_path"]))
+            if Path(document["stored_path"]).exists()
+            and Path(document["stored_path"]).suffix.lower() != ".pdf"
         ]
-        if not ocr_documents:
-            notes.append(f"{document_type}: нет файлов подходящих для Yandex+Gemini OCR.")
+        if not image_documents:
+            notes.append(f"{document_type}: PDF будет подключён к локальному ИИ следующим этапом.")
             continue
-        paths = [Path(document["stored_path"]) for document in ocr_documents]
-        try:
-            result = hybrid_recognize_files(paths, document_type)
-        except RuntimeError as exc:
-            notes.append(f"{document_type}: точное распознавание Yandex+Gemini не сработало: {exc}")
-            continue
+        result = recognize_images(
+            [Path(document["stored_path"]) for document in image_documents],
+            document_type,
+        )
         combined_fields.update(result.get("fields", {}))
         combined_meta.update(result.get("field_meta", {}))
         notes.extend(result.get("warnings", []))
-        text = result.get("text", "")
-        status = result.get("engine", "yandex_gemini")
-        for document in ocr_documents:
-            database.update_document_ocr(document["id"], text, status)
+        for document in image_documents:
+            database.update_document_ocr(document["id"], "", "ai_processed")
             processed += 1
-
-    if not processed and not notes:
-        notes.append("OCR не выполнился. Проверьте Gemini API key и форматы файлов.")
-    fields = normalize_fields(combined_fields)
     return {
         "processed": processed,
-        "fields": fields,
-        "field_meta": {key: value for key, value in combined_meta.items() if key in fields},
+        "fields": normalize_fields(combined_fields),
+        "field_meta": combined_meta,
         "notes": "\n\n".join(notes),
         "notes_by_group": _notes_by_group(notes),
     }
+
 
 @app.post("/api/deals/{deal_id}/contract")
 def make_contract(deal_id: int) -> dict[str, Any]:
@@ -329,5 +426,3 @@ def download_contract(filename: str) -> FileResponse:
     if not path.exists():
         raise HTTPException(404, "Договор не найден")
     return FileResponse(path, filename=safe_name)
-
-

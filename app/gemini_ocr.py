@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import base64
 import json
@@ -66,7 +66,22 @@ def _extract_json(text: str) -> dict[str, Any]:
     return json.loads(text)
 
 
-def recognize_files(paths: list[Path], document_hint: str = "auto") -> dict[str, Any]:
+def _hybrid_rules() -> str:
+    return """
+Критически важные правила извлечения:
+- Паспорт РФ: ФИО собирай из строк рядом с метками Фамилия, Имя, Отчество. Не включай ЛИЧ, Пол, МУЖ, ЖЕН, 866, подпись.
+- Дата рождения берётся только из блока разворота паспорта рядом с Дата рождения/Место рождения. Не используй дату выдачи как дату рождения.
+- Дата выдачи берётся только из блока Паспорт выдан/Дата выдачи.
+- Кем выдан: только название органа выдачи. Не включай 866, код подразделения, Дата выдачи, дату, Личный код, подпись.
+- Адрес берётся только со страницы регистрации/места жительства. Не включай даты регистрации/снятия, УФМС/ОВМ, Код подразделения, Заверил.
+- СТС/СОР: используй обе стороны. Серия и номер СТС обычно напечатаны как 4 цифры + 6 цифр, иногда разнесены по строкам.
+- ПТС/ЭПТС: используй все фото комплекта. Если VIN не ровно 17 латинских символов без I/O/Q, запиши значение в body_number, а vin не заполняй.
+- Марка/модель автомобиля должна быть фактическим названием, а не словом ТС, Марка, Модель или названием поля.
+- Если поле спорное, не включай его или ставь confidence ниже 0.7.
+""".strip()
+
+
+def recognize_files(paths: list[Path], document_hint: str = "auto", ocr_text: str = "") -> dict[str, Any]:
     key = api_key()
     if not key:
         raise RuntimeError("Gemini API key не настроен")
@@ -77,9 +92,13 @@ def recognize_files(paths: list[Path], document_hint: str = "auto") -> dict[str,
 
     prompt = (
         f"{SYSTEM_PROMPT}\n\n"
+        f"{_hybrid_rules()}\n\n"
         f"Тип комплекта, выбранный пользователем: {document_hint}.\n"
         f"Разрешённые поля: {', '.join(FIELD_NAMES)}.\n"
-        "Проанализируй все вложенные изображения/PDF, включая рукописный текст, если он читается.\n"
+        "Проанализируй все вложенные изображения/PDF как один комплект документов. "
+        "Номера страниц соответствуют порядку вложенных файлов.\n"
+        "Сырой текст Yandex OCR ниже может содержать ошибки и нужен как подсказка, изображения важнее:\n"
+        f"--- OCR TEXT START ---\n{ocr_text[:12000]}\n--- OCR TEXT END ---\n"
         "Верни строго JSON без markdown: "
         '{"document_type":"...",'
         '"fields":{"field_name":{"value":"...","confidence":0.0,"page":1,"evidence":"..."}},'
@@ -140,3 +159,4 @@ def recognize_files(paths: list[Path], document_hint: str = "auto") -> dict[str,
         "field_meta": field_meta,
         "warnings": parsed.get("warnings", []),
     }
+

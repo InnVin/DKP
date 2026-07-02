@@ -1,4 +1,4 @@
-﻿const state = { dealId: null, documents: [], highlightMissing: false };
+const state = { dealId: null, documents: [] };
 const form = document.querySelector("#dealForm");
 const message = document.querySelector("#message");
 const documentLabels = {
@@ -15,12 +15,6 @@ const readinessGroups = [
   { label: "Продавец", fields: ["seller_full_name", "seller_passport", "seller_address"] },
   { label: "Покупатель", fields: ["buyer_full_name", "buyer_passport", "buyer_address"] },
   { label: "Автомобиль", fields: ["vehicle_make_model", "vin", "pts_series_number", "sts_series_number"] },
-];
-const requiredAfterRecognition = [
-  "contract_date", "contract_place", "price",
-  "seller_full_name", "seller_birth_date", "seller_passport", "seller_passport_issue_date", "seller_passport_issued_by", "seller_address",
-  "buyer_full_name", "buyer_birth_date", "buyer_passport", "buyer_passport_issue_date", "buyer_passport_issued_by", "buyer_address",
-  "vehicle_make_model", "vehicle_type", "vehicle_year", "vin", "body_number", "color", "registration_plate", "pts_series_number", "sts_series_number",
 ];
 const plateLatinToCyrillic = { A: "А", B: "В", E: "Е", K: "К", M: "М", H: "Н", O: "О", P: "Р", C: "С", T: "Т", Y: "У", X: "Х" };
 const uploadHintByType = {
@@ -58,29 +52,26 @@ function setForm(data = {}) {
   state.documents = data.documents || [];
   renderDocuments();
   clearConfidence();
-  state.highlightMissing = false;
   updateReadiness();
 }
 
 function clearConfidence() {
   form.querySelectorAll("input, textarea").forEach(field => {
-    field.classList.remove("confidence-high", "confidence-medium", "confidence-low", "field-missing");
+    field.classList.remove("confidence-high", "confidence-medium", "confidence-low");
     field.removeAttribute("title");
   });
 }
 
-function markMissingFields() {
-  form.querySelectorAll("input, textarea").forEach(field => field.classList.remove("field-missing"));
-  if (!state.highlightMissing) return;
-  for (const name of requiredAfterRecognition) {
-    const field = form.elements.namedItem(name);
-    if (!field || field.name.endsWith("_phone")) continue;
-    if (!String(field.value || "").trim()) field.classList.add("field-missing");
-  }
-}
-
 function applyConfidence(meta = {}) {
-  markMissingFields();
+  clearConfidence();
+  for (const [key, item] of Object.entries(meta)) {
+    const field = form.elements.namedItem(key);
+    if (!field) continue;
+    const confidence = Number(item.confidence || 0);
+    const level = confidence >= .85 ? "high" : confidence >= .65 ? "medium" : "low";
+    field.classList.add(`confidence-${level}`);
+    field.title = `Уверенность: ${Math.round(confidence * 100)}%. ${item.evidence || ""}`;
+  }
 }
 
 async function api(url, options = {}) {
@@ -149,7 +140,6 @@ async function uploadFiles(files, type = "other") {
       const clean = normalizeDealField(key, value);
       if (field && !field.value && clean) field.value = clean;
     }
-    state.highlightMissing = true;
     applyConfidence(result.field_meta || {});
     updateReadiness();
     if (result.note) {
@@ -243,9 +233,8 @@ async function reprocessDeal() {
   }
   const button = document.querySelector("#reprocessDeal");
   button.disabled = true;
-  const originalHtml = button.innerHTML;
-  button.classList.add("loading");
-  button.setAttribute("aria-label", "Распознаю документы");
+  const originalText = button.textContent;
+  button.textContent = "Распознаю...";
   try {
     const result = await api(`/api/deals/${state.dealId}/reprocess`, { method: "POST" });
     for (const [key, value] of Object.entries(result.fields || {})) {
@@ -253,7 +242,6 @@ async function reprocessDeal() {
       const clean = normalizeDealField(key, value);
       if (field && clean) field.value = clean;
     }
-    state.highlightMissing = true;
     applyConfidence(result.field_meta || {});
     setRecognitionNotes(result.notes_by_group || {}, result.notes || "");
     updateReadiness();
@@ -261,9 +249,7 @@ async function reprocessDeal() {
     showMessage(`Обработано документов: ${result.processed}. Проверьте заполненные поля.`);
   } finally {
     button.disabled = false;
-    button.classList.remove("loading");
-    button.innerHTML = originalHtml;
-    button.setAttribute("aria-label", "Распознать документы заново");
+    button.textContent = originalText;
   }
 }
 
@@ -300,7 +286,7 @@ function updateReadiness() {
 
   if (readiness.percent >= 90) {
     title.textContent = "Договор почти готов к Excel";
-    hint.textContent = "Проверьте пустые поля, затем можно создавать договор.";
+    hint.textContent = "Проверьте жёлтые и красные поля распознавания, затем можно создавать договор.";
   } else if (readiness.percent >= 45) {
     title.textContent = "Договор частично заполнен";
     hint.textContent = `Осталось проверить: ${missing.join(", ") || "поля распознавания"}.`;
@@ -409,13 +395,6 @@ document.querySelector("#saveDeal").addEventListener("click", () => saveDeal().c
 document.querySelector("#newDeal").addEventListener("click", newDeal);
 document.querySelector("#makeContract").addEventListener("click", () => makeContract().catch(e => showMessage(e.message, true)));
 document.querySelector("#reprocessDeal").addEventListener("click", () => reprocessDeal().catch(e => showMessage(e.message, true)));
-document.querySelector("#sidebarToggle").addEventListener("click", () => {
-  document.body.classList.toggle("sidebar-collapsed");
-  const collapsed = document.body.classList.contains("sidebar-collapsed");
-  const button = document.querySelector("#sidebarToggle");
-  button.title = collapsed ? "Показать архив" : "Свернуть архив";
-  button.setAttribute("aria-label", button.title);
-});
 document.querySelector("#uploadGrid").addEventListener("change", e => {
   const input = e.target.closest("input[type='file']");
   if (!input) return;
@@ -461,12 +440,8 @@ form.addEventListener("input", e => {
   }
   if (field.name === "registration_plate") field.value = normalizePlate(field.value);
   if (field.name === "vin") field.value = normalizeDealField("vin", field.value);
-  markMissingFields();
   updateReadiness();
 });
 
 newDeal();
 loadArchive().catch(e => showMessage(e.message, true));
-
-
-

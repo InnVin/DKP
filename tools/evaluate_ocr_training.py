@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import sys
@@ -12,10 +12,8 @@ EXAMPLE_PATH = ROOT / "training_examples" / "cases.example.json"
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from app.hybrid_ocr import recognize_files as hybrid_recognize_files  # noqa: E402
 from app.ocr import normalize_fields, recognize  # noqa: E402
-from app.yandex_ocr import can_process as yandex_can_process  # noqa: E402
-from app.yandex_ocr import recognize_files as yandex_recognize_files  # noqa: E402
-from app.yandex_ocr import status as yandex_status  # noqa: E402
 
 
 def _load_cases() -> list[dict[str, Any]]:
@@ -60,16 +58,8 @@ def _compare(expected: dict[str, str], actual: dict[str, str]) -> tuple[int, int
 
 
 def _recognize_case(file_paths: list[Path], document_type: str) -> dict[str, str]:
-    yandex = yandex_status()
-    if yandex.get("configured") and all(yandex_can_process(path) for path in file_paths):
-        result = yandex_recognize_files(file_paths, document_type)
-        return normalize_fields(result.get("fields", {}))
-
-    actual: dict[str, str] = {}
-    for file_path in file_paths:
-        result = recognize(file_path, document_type)
-        actual.update(normalize_fields(result.get("fields", {})))
-    return actual
+    result = hybrid_recognize_files(file_paths, document_type)
+    return normalize_fields(result.get("fields", {}))
 
 
 def main() -> int:
@@ -116,3 +106,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
