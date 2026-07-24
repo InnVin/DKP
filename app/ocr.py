@@ -58,6 +58,30 @@ def _format_series_number(value: str) -> str:
     return compact
 
 
+def _format_sts_number(value: str) -> str:
+    compact = re.sub(r"[^0-9А-ЯA-Z]", "", value.upper()).translate(PLATE_LATIN_TO_CYRILLIC)
+    digits = re.sub(r"\D", "", compact)
+    if re.fullmatch(r"\d{10}", compact):
+        return f"{compact[:4]} {compact[4:]}"
+    if re.fullmatch(r"\d{2}[А-Я]{2}\d{6}", compact):
+        return f"{compact[:4]} {compact[4:]}"
+    if len(digits) == 10:
+        return f"{digits[:4]} {digits[4:]}"
+    return ""
+
+
+def _format_pts_number(value: str) -> str:
+    compact = re.sub(r"[^0-9А-ЯA-Z]", "", value.upper()).translate(PLATE_LATIN_TO_CYRILLIC)
+    digits = re.sub(r"\D", "", compact)
+    if len(digits) == 15:
+        return digits
+    if re.fullmatch(r"\d{2}[А-Я]{2}\d{6}", compact):
+        return f"{compact[:4]} {compact[4:]}"
+    if len(digits) == 8:
+        return f"{digits[:4]} {digits[4:]}"
+    return ""
+
+
 def _normalize_plate(value: str) -> str:
     compact = re.sub(r"\s+", "", value.upper()).translate(PLATE_LATIN_TO_CYRILLIC)
     compact = re.sub(r"[^АВЕКМНОРСТУХ0-9]", "", compact)
@@ -93,11 +117,10 @@ def _valid_field(key: str, value: str) -> str:
     elif key in {"seller_passport", "buyer_passport"}:
         formatted = _format_series_number(value)
         return formatted if re.fullmatch(r"\d{4}\s\d{6}", formatted) else ""
-    elif key in {"sts_series_number", "pts_series_number"}:
-        compact = re.sub(r"[^А-ЯA-Z0-9]", "", upper)
-        if not (8 <= len(compact) <= 18) or len(re.findall(r"\d", compact)) < 6:
-            return ""
-        return _format_series_number(value)
+    elif key == "sts_series_number":
+        return _format_sts_number(value)
+    elif key == "pts_series_number":
+        return _format_pts_number(value)
     elif key == "color":
         colors = (
             "БЕЛЫЙ", "ЧЕРНЫЙ", "ЧЁРНЫЙ", "СЕРЫЙ", "СЕРЕБРИСТЫЙ", "КРАСНЫЙ",

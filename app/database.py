@@ -71,6 +71,9 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_deals_plate ON deals(registration_plate);
             """
         )
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(deals)").fetchall()}
+        if "deleted_at" not in columns:
+            conn.execute("ALTER TABLE deals ADD COLUMN deleted_at TEXT NOT NULL DEFAULT ''")
 
 
 def _summary(payload: dict[str, Any]) -> dict[str, str]:
@@ -141,9 +144,12 @@ def save_deal(payload: dict[str, Any], deal_id: int | None = None) -> int:
         return int(cursor.lastrowid)
 
 
-def get_deal(deal_id: int) -> dict[str, Any] | None:
+def get_deal(deal_id: int, include_deleted: bool = False) -> dict[str, Any] | None:
     with connection() as conn:
-        row = conn.execute("SELECT * FROM deals WHERE id=?", (deal_id,)).fetchone()
+        if include_deleted:
+            row = conn.execute("SELECT * FROM deals WHERE id=?", (deal_id,)).fetchone()
+        else:
+            row = conn.execute("SELECT * FROM deals WHERE id=? AND deleted_at=''", (deal_id,)).fetchone()
         if not row:
             return None
         payload = json.loads(row["payload_json"])
@@ -169,19 +175,23 @@ def get_deal(deal_id: int) -> dict[str, Any] | None:
 
 def delete_deal(deal_id: int) -> bool:
     with connection() as conn:
-        paths = [
-            Path(row["stored_path"])
-            for row in conn.execute("SELECT stored_path FROM documents WHERE deal_id=?", (deal_id,)).fetchall()
-        ]
-        cursor = conn.execute("DELETE FROM deals WHERE id=?", (deal_id,))
-    folder = UPLOAD_DIR / str(deal_id)
-    for path in paths:
-        _delete_upload_file(path)
-    if folder.exists() and folder.is_dir():
-        try:
-            shutil.rmtree(folder)
-        except OSError:
-            pass
+        cursor = conn.execute(
+            "UPDATE deals SET deleted_at=?, updated_at=? WHERE id=? AND deleted_at=''",
+            (
+                datetime.now().isoformat(timespec="seconds"),
+                datetime.now().isoformat(timespec="seconds"),
+                deal_id,
+            ),
+        )
+    return cursor.rowcount > 0
+
+
+def restore_deal(deal_id: int) -> bool:
+    with connection() as conn:
+        cursor = conn.execute(
+            "UPDATE deals SET deleted_at='', updated_at=? WHERE id=? AND deleted_at<>''",
+            (datetime.now().isoformat(timespec="seconds"), deal_id),
+        )
     return cursor.rowcount > 0
 
 
@@ -199,10 +209,11 @@ def search_deals(query: str = "") -> list[dict[str, Any]]:
                        buyer_full_name, buyer_phone, vin, registration_plate,
                        vehicle_make_model
                 FROM deals
-                WHERE seller_full_name LIKE ? OR seller_phone LIKE ?
+                WHERE (seller_full_name LIKE ? OR seller_phone LIKE ?
                    OR buyer_full_name LIKE ? OR buyer_phone LIKE ?
                    OR vin LIKE ? OR registration_plate LIKE ?
-                   OR payload_json LIKE ? OR REPLACE(UPPER(payload_json), ' ', '') LIKE ?
+                   OR payload_json LIKE ? OR REPLACE(UPPER(payload_json), ' ', '') LIKE ?)
+                  AND deleted_at=''
                 ORDER BY updated_at DESC LIMIT 100
                 """,
                 (like, like, like, like, like, like, payload_like, compact_like),
@@ -213,7 +224,7 @@ def search_deals(query: str = "") -> list[dict[str, Any]]:
                 SELECT id, created_at, updated_at, seller_full_name, seller_phone,
                        buyer_full_name, buyer_phone, vin, registration_plate,
                        vehicle_make_model
-                FROM deals ORDER BY updated_at DESC LIMIT 100
+                FROM deals WHERE deleted_at='' ORDER BY updated_at DESC LIMIT 100
                 """
             ).fetchall()
         result: list[dict[str, Any]] = []
@@ -225,6 +236,28 @@ def search_deals(query: str = "") -> list[dict[str, Any]]:
                 item.update({key: payload.get(key, "") for key in payload.keys() if isinstance(payload.get(key), str)})
             result.append(item)
         return result
+
+
+def list_deleted_deals() -> list[dict[str, Any]]:
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, deleted_at, seller_full_name, vehicle_make_model, payload_json
+            FROM deals
+            WHERE deleted_at<>''
+            ORDER BY deleted_at DESC LIMIT 100
+            """
+        ).fetchall()
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        payload = json.loads(item.pop("payload_json") or "{}")
+        item["seller_full_name"] = payload.get("seller_full_name", item.get("seller_full_name", ""))
+        item["vehicle_make_model"] = payload.get("vehicle_make_model", item.get("vehicle_make_model", ""))
+        item["registration_plate"] = payload.get("registration_plate", "")
+        item["vin"] = payload.get("vin", "")
+        result.append(item)
+    return result
 
 
 def add_document(

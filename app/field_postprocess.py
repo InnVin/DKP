@@ -30,12 +30,37 @@ def _passport(value: str) -> str:
 
 
 def _doc_series(value: str) -> str:
-    compact = re.sub(r"[^0-9А-ЯA-Z]", "", value.upper())
+    compact = re.sub(r"[^0-9А-ЯA-Z]", "", value.upper()).translate(PLATE_LATIN_TO_CYRILLIC)
     digits = re.sub(r"\D", "", compact)
     if len(digits) >= 10:
         return f"{digits[:4]} {digits[4:10]}"
     if 8 <= len(compact) <= 18 and len(re.findall(r"\d", compact)) >= 6:
         return f"{compact[:4]} {compact[4:10]}" if len(compact) >= 10 else compact
+    return ""
+
+
+def _pts_series(value: str) -> str:
+    compact = re.sub(r"[^0-9А-ЯA-Z]", "", value.upper()).translate(PLATE_LATIN_TO_CYRILLIC)
+    digits = re.sub(r"\D", "", compact)
+    if len(digits) == 15:
+        return digits
+    match = re.fullmatch(r"\d{2}[А-Я]{2}\d{6}", compact)
+    if match:
+        return f"{compact[:4]} {compact[4:]}"
+    if len(digits) == 8:
+        return f"{digits[:4]} {digits[4:8]}"
+    return ""
+
+
+def _sts_series(value: str) -> str:
+    compact = re.sub(r"[^0-9А-ЯA-Z]", "", value.upper()).translate(PLATE_LATIN_TO_CYRILLIC)
+    digits = re.sub(r"\D", "", compact)
+    if re.fullmatch(r"\d{10}", compact):
+        return f"{compact[:4]} {compact[4:]}"
+    if re.fullmatch(r"\d{2}[А-Я]{2}\d{6}", compact):
+        return f"{compact[:4]} {compact[4:]}"
+    if len(digits) == 10:
+        return f"{digits[:4]} {digits[4:]}"
     return ""
 
 
@@ -48,6 +73,8 @@ def _plate(value: str) -> str:
 
 def _issued_by(value: str) -> str:
     value = _clean(value.replace("...", " ").replace("…", " "))
+    if re.search(r"\b(?:место\s+жительства|зарегистрирован|регистрация|адрес|ул\.?|улица|дом|кв\.?|квартира)\b", value, flags=re.IGNORECASE):
+        return ""
     value = re.sub(r"\b\d{3}\b", " ", value)
     value = re.sub(r"\b\d{3}[-–]\d{3}\b", " ", value)
     value = re.sub(r"\b(?:дата\s+выдачи|код\s+подразделения|личный\s+код|личная\s+подпись)\b", " ", value, flags=re.IGNORECASE)
@@ -57,6 +84,7 @@ def _issued_by(value: str) -> str:
 
 def _address(value: str) -> str:
     value = _clean(value.replace("...", " ").replace("…", " "))
+    value = re.sub(r"\bместо\s+рождения\b.*", " ", value, flags=re.IGNORECASE)
     value = DATE_RE.sub(" ", value)
     value = re.sub(
         r"\b(?:уфмс|овм|гибдд|код\s+подразделения|заверил|снят\s+с|дата\s+выдачи|паспорт\s+выдан)\b.*",
@@ -65,7 +93,10 @@ def _address(value: str) -> str:
         flags=re.IGNORECASE,
     )
     value = re.sub(r"\b\d{1,2}\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\b.*", " ", value, flags=re.IGNORECASE)
-    return _clean(value)
+    value = _clean(value)
+    if value and not re.search(r"\b(?:ул|улица|проспект|пр-кт|пер|переулок|дом|д\.|кв|квартира|район|р-н|город|г\.|село|с\.|поселок|п\.|область|край|республика|улус)\b", value, flags=re.IGNORECASE):
+        return ""
+    return value
 
 
 def _vin_or_body(value: str) -> tuple[str, str]:
@@ -82,7 +113,25 @@ def _name(value: str) -> str:
     return _clean(value).title()
 
 
+def _scope_person_fields(fields: dict[str, Any], document_hint: str) -> dict[str, Any]:
+    if document_hint not in {"seller_passport", "buyer_passport"}:
+        return fields
+    target = "seller" if document_hint == "seller_passport" else "buyer"
+    other = "buyer" if target == "seller" else "seller"
+    scoped: dict[str, Any] = {}
+    for key, value in fields.items():
+        if key.startswith(f"{other}_"):
+            mapped = f"{target}_{key[len(other) + 1:]}"
+            if mapped in FIELD_NAMES and mapped not in scoped:
+                scoped[mapped] = value
+            continue
+        if key.startswith(f"{target}_") or not key.startswith(("seller_", "buyer_")):
+            scoped[key] = value
+    return scoped
+
+
 def postprocess_fields(fields: dict[str, Any], document_hint: str = "auto") -> dict[str, str]:
+    fields = _scope_person_fields(fields, document_hint)
     cleaned: dict[str, str] = {}
     for key, raw in fields.items():
         if key not in FIELD_NAMES:
@@ -102,8 +151,10 @@ def postprocess_fields(fields: dict[str, Any], document_hint: str = "auto") -> d
             value = _name(value)
         elif key == "registration_plate":
             value = _plate(value)
-        elif key in {"pts_series_number", "sts_series_number"}:
-            value = _doc_series(value)
+        elif key == "pts_series_number":
+            value = _pts_series(value)
+        elif key == "sts_series_number":
+            value = _sts_series(value)
         elif key == "vin":
             vin, body = _vin_or_body(value)
             value = vin
@@ -124,5 +175,9 @@ def postprocess_fields(fields: dict[str, Any], document_hint: str = "auto") -> d
         issue = cleaned.get(f"{prefix}_passport_issue_date")
         if birth and issue and birth == issue:
             cleaned.pop(f"{prefix}_birth_date", None)
+        if cleaned.get(f"{prefix}_passport_issued_by") and not (
+            cleaned.get(f"{prefix}_full_name") and cleaned.get(f"{prefix}_passport") and cleaned.get(f"{prefix}_passport_issue_date")
+        ):
+            cleaned.pop(f"{prefix}_passport_issued_by", None)
 
     return normalize_fields(cleaned)

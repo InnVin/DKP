@@ -5,7 +5,7 @@ $SystemPython = "C:\Python314\python.exe"
 $Port = 8765
 
 if (-not (Test-Path -LiteralPath $Python)) {
-    Write-Host "Сначала выполняется первоначальная установка..." -ForegroundColor Yellow
+    Write-Host "First setup is running..." -ForegroundColor Yellow
     & "$ProjectRoot\setup.ps1"
 }
 
@@ -13,16 +13,16 @@ $Existing = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Sil
     Select-Object -ExpandProperty OwningProcess -Unique
 foreach ($ProcessId in $Existing) {
     try {
-        Write-Host "Останавливаю старый сервер на порту $Port..." -ForegroundColor Yellow
+        Write-Host "Stopping old server on port $Port..." -ForegroundColor Yellow
         Stop-Process -Id $ProcessId -Force
     } catch {
-        Write-Host "Не удалось остановить процесс ${ProcessId}: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "Could not stop process ${ProcessId}: $($_.Exception.Message)" -ForegroundColor Red
     }
 }
 
 Start-Process "http://127.0.0.1:$Port"
-Write-Host "АвтоДоговор запущен: http://127.0.0.1:$Port" -ForegroundColor Green
-Write-Host "Для остановки нажмите Ctrl+C или закройте это окно." -ForegroundColor DarkGray
+Write-Host "AutoDogovor started: http://127.0.0.1:$Port" -ForegroundColor Green
+Write-Host "To stop: press Ctrl+C or close this window." -ForegroundColor DarkGray
 
 try {
     & $Python -c "import fastapi, uvicorn" 2>$null
@@ -32,7 +32,7 @@ try {
     }
 } catch {}
 
-Write-Host "Основной запуск недоступен. Включаю аварийный режим." -ForegroundColor Yellow
+Write-Host "Main server is unavailable. Starting fallback mode." -ForegroundColor Yellow
 if (Test-Path -LiteralPath $SystemPython) {
     & $SystemPython "$ProjectRoot\fallback_autodogovor_server.py"
 } else {

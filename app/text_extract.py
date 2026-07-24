@@ -28,7 +28,7 @@ def extract_fields_from_text(text: str, source: str = "ocr_text", document_hint:
     is_seller_passport = document_hint == "seller_passport"
     is_buyer_passport = document_hint == "buyer_passport"
     is_passport = is_seller_passport or is_buyer_passport
-    is_vehicle_doc = document_hint in {"pts", "sts", "old_contract", "auto"}
+    is_vehicle_doc = document_hint in {"vehicle_docs", "pts", "sts", "old_contract", "auto"}
     can_read_person = is_passport or document_hint in {"old_contract", "auto"}
     prefix = "buyer" if is_buyer_passport else "seller"
 
@@ -199,11 +199,11 @@ def extract_fields_from_text(text: str, source: str = "ocr_text", document_hint:
         if plate:
             add("registration_plate", re.sub(r"\s+", "", plate.group(1)), 0.65, plate.group(0))
 
-        pts = re.search(r"(?:ЭПТС|ЕПТС|ПТС|ПАСПОРТ ТРАНСПОРТНОГО СРЕДСТВА|ЭЛЕКТРОННЫЙ ПАСПОРТ(?: ТРАНСПОРТНОГО СРЕДСТВА)?)[\s\S]{0,80}?([А-ЯA-Z0-9]{2,4}\s?\d{6,15})", upper_text)
+        pts = re.search(r"(?:ЭПТС|ЕПТС|ПТС|ПАСПОРТ ТРАНСПОРТНОГО СРЕДСТВА|ЭЛЕКТРОННЫЙ ПАСПОРТ(?: ТРАНСПОРТНОГО СРЕДСТВА)?)[\s\S]{0,120}?(\d{15}|\d{2}[А-ЯA-Z]{2}\s?\d{6}|\d{4}\s?\d{4})", upper_text)
         if pts:
             add("pts_series_number", pts.group(1), 0.58, pts.group(0))
 
-        sts = re.search(r"(?:СТС|СОР|СВИДЕТЕЛЬСТВО(?: О РЕГИСТРАЦИИ)?(?: ТС)?)[\s\S]{0,80}?([А-ЯA-Z0-9]{2,4}\s?\d{6,8})", upper_text)
+        sts = re.search(r"(?:СТС|СОР|СВИДЕТЕЛЬСТВО(?: О РЕГИСТРАЦИИ)?(?: ТС)?)[\s\S]{0,120}?(\d{4}\s?\d{6}|\d{2}[А-ЯA-Z]{2}\s?\d{6})", upper_text)
         if sts:
             add("sts_series_number", sts.group(1), 0.58, sts.group(0))
 

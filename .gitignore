@@ -7,5 +7,6 @@ data/*
 templates/*.xls
 templates/*.xlsx
 config/gemini_api_key.txt
+config/openrouter_api_key.txt
 config/yandex_api_key.txt
 config/yandex_folder_id.txt

@@ -10,6 +10,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 from . import database
 from .ai_ocr import recognize_images, status as ai_status
@@ -18,6 +19,8 @@ from .gemini_ocr import can_process as gemini_can_process
 from .gemini_ocr import recognize_files as gemini_recognize_files
 from .gemini_ocr import status as gemini_status
 from .hybrid_ocr import recognize_files as hybrid_recognize_files
+from .openrouter_ocr import can_process as openrouter_can_process
+from .openrouter_ocr import status as openrouter_status
 from .ocr import normalize_fields, recognize
 from .yandex_ocr import can_process as yandex_can_process
 from .yandex_ocr import recognize_files as yandex_recognize_files
@@ -25,7 +28,7 @@ from .yandex_ocr import status as yandex_status
 
 ROOT = Path(__file__).resolve().parents[1]
 STATIC_DIR = ROOT / "app" / "static"
-ALLOWED_DOCUMENT_TYPES = {"auto", "seller_passport", "buyer_passport", "pts", "sts", "old_contract", "other"}
+ALLOWED_DOCUMENT_TYPES = {"auto", "seller_passport", "buyer_passport", "vehicle_docs", "pts", "sts", "old_contract", "other"}
 ALLOWED_EXTENSIONS = {
     ".jpg",
     ".jpeg",
@@ -96,6 +99,7 @@ def health() -> dict[str, Any]:
         "ocr": ai_status(),
         "yandex_ocr": yandex_status(),
         "gemini_ocr": gemini_status(),
+        "openrouter_ocr": openrouter_status(),
         "version": app.version,
     }
 
@@ -103,6 +107,11 @@ def health() -> dict[str, Any]:
 @app.get("/api/deals")
 def list_deals(q: str = "") -> list[dict[str, Any]]:
     return database.search_deals(q)
+
+
+@app.get("/api/deals-trash")
+def list_deleted_deals() -> list[dict[str, Any]]:
+    return database.list_deleted_deals()
 
 
 @app.get("/api/deals/{deal_id}")
@@ -142,17 +151,17 @@ async def upload_document(
     stored = folder / f"{uuid.uuid4().hex}{suffix}"
     with stored.open("wb") as destination:
         shutil.copyfileobj(file.file, destination)
-    if gemini_can_process(stored):
+    if gemini_can_process(stored) or openrouter_can_process(stored):
         existing_paths = [
             Path(document["stored_path"])
             for document in database.get_deal_documents(deal_id)
-            if document["document_type"] == document_type and Path(document["stored_path"]).exists() and gemini_can_process(Path(document["stored_path"]))
+            if document["document_type"] == document_type and Path(document["stored_path"]).exists() and (gemini_can_process(Path(document["stored_path"])) or openrouter_can_process(Path(document["stored_path"])))
         ]
         group_paths = [*existing_paths, stored]
         try:
-            ai_result = hybrid_recognize_files(group_paths, document_type)
+            ai_result = await run_in_threadpool(hybrid_recognize_files, group_paths, document_type)
             result = {
-                "status": ai_result.get("engine", "yandex_gemini"),
+                "status": ai_result.get("engine", "yandex_openrouter"),
                 "fields": ai_result.get("fields", {}),
                 "field_meta": ai_result.get("field_meta", {}),
                 "text": ai_result.get("text", ""),
@@ -163,24 +172,24 @@ async def upload_document(
             }
         except RuntimeError as exc:
             result = {
-                "status": "waiting_gemini",
+                "status": "waiting_cloud_ocr",
                 "fields": {},
                 "field_meta": {},
                 "text": "",
-                "note": f"Файл сохранён, но точное распознавание Yandex+Gemini не сработало: {exc}",
+                "note": f"Файл сохранён, но точное распознавание Yandex+OpenRouter/Gemini не сработало: {exc}",
                 "detected_type": document_type,
                 "effective_type": document_type,
                 "pages": 1,
             }
     elif yandex_can_process(stored) and yandex_status().get("configured"):
         try:
-            ai_result = yandex_recognize_files([stored], document_type)
+            ai_result = await run_in_threadpool(yandex_recognize_files, [stored], document_type)
             result = {
                 "status": "yandex_text_only",
                 "fields": {},
                 "field_meta": {},
                 "text": ai_result.get("text", ""),
-                "note": "Файл сохранён. Для заполнения полей нужен Gemini API key; Yandex OCR сохранил только сырой текст.",
+                "note": "Файл сохранён. Для заполнения полей нужен OpenRouter или Gemini API key; Yandex OCR сохранил только сырой текст.",
                 "detected_type": document_type,
                 "effective_type": document_type,
                 "pages": 1,
@@ -202,7 +211,7 @@ async def upload_document(
             "fields": {},
             "field_meta": {},
             "text": "",
-            "note": "Файл сохранён как вложение. Для точного распознавания нужны изображения/PDF и Gemini API key.",
+            "note": "Файл сохранён как вложение. Для точного распознавания нужны изображения/PDF и OpenRouter или Gemini API key.",
             "detected_type": document_type,
             "effective_type": document_type,
             "pages": 1,
@@ -244,6 +253,13 @@ def delete_deal(deal_id: int) -> dict[str, Any]:
     return {"deleted": True}
 
 
+@app.post("/api/deals/{deal_id}/restore")
+def restore_deal(deal_id: int) -> dict[str, Any]:
+    if not database.restore_deal(deal_id):
+        raise HTTPException(404, "Сделка не найдена в корзине")
+    return {"restored": True}
+
+
 @app.get("/api/documents/{document_id}")
 def download_document(document_id: int) -> FileResponse:
     path = database.get_document_path(document_id)
@@ -253,7 +269,7 @@ def download_document(document_id: int) -> FileResponse:
 
 
 @app.post("/api/deals/{deal_id}/reprocess")
-def reprocess_documents(deal_id: int) -> dict[str, Any]:
+async def reprocess_documents(deal_id: int) -> dict[str, Any]:
     deal = database.get_deal(deal_id)
     if not deal:
         raise HTTPException(404, "Сделка не найдена")
@@ -273,22 +289,22 @@ def reprocess_documents(deal_id: int) -> dict[str, Any]:
         ocr_documents = [
             document
             for document in group
-            if Path(document["stored_path"]).exists() and gemini_can_process(Path(document["stored_path"]))
+            if Path(document["stored_path"]).exists() and (gemini_can_process(Path(document["stored_path"])) or openrouter_can_process(Path(document["stored_path"])))
         ]
         if not ocr_documents:
-            notes.append(f"{document_type}: нет файлов подходящих для Yandex+Gemini OCR.")
+            notes.append(f"{document_type}: нет файлов подходящих для Yandex+OpenRouter/Gemini OCR.")
             continue
         paths = [Path(document["stored_path"]) for document in ocr_documents]
         try:
-            result = hybrid_recognize_files(paths, document_type)
+            result = await run_in_threadpool(hybrid_recognize_files, paths, document_type)
         except RuntimeError as exc:
-            notes.append(f"{document_type}: точное распознавание Yandex+Gemini не сработало: {exc}")
+            notes.append(f"{document_type}: точное распознавание Yandex+OpenRouter/Gemini не сработало: {exc}")
             continue
         combined_fields.update(result.get("fields", {}))
         combined_meta.update(result.get("field_meta", {}))
         notes.extend(result.get("warnings", []))
         text = result.get("text", "")
-        status = result.get("engine", "yandex_gemini")
+        status = result.get("engine", "yandex_openrouter")
         for document in ocr_documents:
             database.update_document_ocr(document["id"], text, status)
             processed += 1

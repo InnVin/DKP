@@ -1,9 +1,10 @@
-﻿const state = { dealId: null, documents: [], highlightMissing: false };
+﻿const state = { dealId: null, documents: [], highlightMissing: false, deleteConfirmId: null, trashOpen: false };
 const form = document.querySelector("#dealForm");
 const message = document.querySelector("#message");
 const documentLabels = {
   seller_passport: "Паспорт продавца",
   buyer_passport: "Паспорт покупателя",
+  vehicle_docs: "ПТС / СТС",
   pts: "ПТС",
   sts: "СТС",
   old_contract: "Старый ДКП",
@@ -11,13 +12,20 @@ const documentLabels = {
   auto: "Автоопределение",
 };
 const readinessGroups = [
-  { label: "Договор", fields: ["contract_date", "contract_place", "price"] },
-  { label: "Продавец", fields: ["seller_full_name", "seller_passport", "seller_address"] },
-  { label: "Покупатель", fields: ["buyer_full_name", "buyer_passport", "buyer_address"] },
-  { label: "Автомобиль", fields: ["vehicle_make_model", "vin", "pts_series_number", "sts_series_number"] },
+  { label: "Договор", target: "section-contract", fields: ["contract_date", "contract_place"] },
+  { label: "Продавец", target: "section-seller", fields: ["seller_full_name", "seller_passport", "seller_address"] },
+  { label: "Покупатель", target: "section-buyer", fields: ["buyer_full_name", "buyer_passport", "buyer_address"] },
+  { label: "Автомобиль", target: "section-vehicle", fields: ["vehicle_make_model", "vin", "pts_series_number", "sts_series_number"] },
 ];
+const sectionFields = {
+  contract: ["contract_date", "contract_place", "price"],
+  seller: ["seller_full_name", "seller_birth_date", "seller_phone", "seller_passport", "seller_passport_issue_date", "seller_passport_issued_by", "seller_address"],
+  buyer: ["buyer_full_name", "buyer_birth_date", "buyer_phone", "buyer_passport", "buyer_passport_issue_date", "buyer_passport_issued_by", "buyer_address"],
+  vehicle: ["vehicle_make_model", "vehicle_type", "vehicle_year", "vin", "body_number", "chassis_number", "color", "registration_plate", "pts_series_number", "sts_series_number"],
+  notes: ["seller_notes", "buyer_notes", "vehicle_notes", "notes"],
+};
 const requiredAfterRecognition = [
-  "contract_date", "contract_place", "price",
+  "contract_date", "contract_place",
   "seller_full_name", "seller_birth_date", "seller_passport", "seller_passport_issue_date", "seller_passport_issued_by", "seller_address",
   "buyer_full_name", "buyer_birth_date", "buyer_passport", "buyer_passport_issue_date", "buyer_passport_issued_by", "buyer_address",
   "vehicle_make_model", "vehicle_type", "vehicle_year", "vin", "body_number", "color", "registration_plate", "pts_series_number", "sts_series_number",
@@ -26,6 +34,7 @@ const plateLatinToCyrillic = { A: "А", B: "В", E: "Е", K: "К", M: "М", H: "
 const uploadHintByType = {
   seller_passport: "Разворот и прописка",
   buyer_passport: "Разворот и прописка",
+  vehicle_docs: "ПТС и СТС одним комплектом",
   pts: "Все нужные страницы",
   sts: "Обе стороны",
   old_contract: "Печатный или рукописный",
@@ -97,7 +106,7 @@ async function saveDeal(silent = false) {
     body: JSON.stringify({ deal_id: state.dealId, data: formData() }),
   });
   state.dealId = result.id;
-  document.querySelector("#dealBadge").textContent = `№ ${result.id}`;
+  document.querySelector("#dealBadge").textContent = `ДКП №${result.id}`;
   if (!silent) showMessage("Карточка сохранена");
   await loadArchive();
   return result.id;
@@ -113,17 +122,23 @@ async function loadArchive(query = "") {
         <strong>${escapeHtml(row.buyer_full_name || row.seller_full_name || "Без имени")}</strong>
         ${archiveBadge(row)}
       </div>
-      <button class="icon-delete archive-delete" type="button" title="Удалить сделку" data-delete-deal="${row.id}">×</button>
+      ${state.deleteConfirmId === row.id ? `
+        <div class="archive-confirm">
+          <button class="confirm-delete" type="button" title="Подтвердить удаление" data-confirm-delete-deal="${row.id}">✓</button>
+          <button class="cancel-delete" type="button" title="Отмена" data-cancel-delete>×</button>
+        </div>
+      ` : `<button class="icon-delete archive-delete" type="button" title="Удалить сделку" data-delete-deal="${row.id}">×</button>`}
       <span>${escapeHtml(row.vehicle_make_model || "Автомобиль не указан")}</span>
       <span>${escapeHtml([row.registration_plate, row.vin].filter(Boolean).join(" · "))}</span>
     </div>`).join("") || "<p>Архив пока пуст</p>";
+  await loadTrash();
 }
 
 async function openDeal(id) {
   const data = await api(`/api/deals/${id}`);
   state.dealId = id;
   setForm(data);
-  document.querySelector("#dealBadge").textContent = `№ ${id}`;
+  document.querySelector("#dealBadge").textContent = `ДКП №${id}`;
   await loadArchive(document.querySelector("#archiveSearch").value);
 }
 
@@ -138,16 +153,51 @@ function newDeal() {
 async function uploadFiles(files, type = "other") {
   if (!files.length) return;
   if (!state.dealId) await saveDeal(true);
-  for (const file of files) {
-    const body = new FormData();
-    body.append("document_type", type);
-    body.append("file", file);
-    showMessage(`Загружаю ${file.name}...`);
-    const result = await api(`/api/deals/${state.dealId}/documents`, { method: "POST", body });
+  showMessage(`Добавлено файлов: ${files.length}`);
+  files.forEach(file => uploadOneFile(file, type));
+}
+
+function uploadOneFile(file, type = "other") {
+  const tempId = `upload-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  state.documents.push({
+    id: tempId,
+    document_type: type,
+    original_name: file.name,
+    ocr_status: "uploading",
+    file_size: file.size,
+    progress: 0,
+  });
+  renderDocuments();
+
+  const body = new FormData();
+  body.append("document_type", type);
+  body.append("file", file);
+
+  const xhr = new XMLHttpRequest();
+  xhr.open("POST", `/api/deals/${state.dealId}/documents`);
+  xhr.upload.onprogress = event => {
+    if (!event.lengthComputable) return;
+    updateUploadProgress(tempId, Math.round((event.loaded / event.total) * 100), "Загрузка");
+  };
+  xhr.upload.onload = () => updateUploadProgress(tempId, 100, "Распознавание");
+  xhr.onload = () => {
+    let result = {};
+    try {
+      result = JSON.parse(xhr.responseText || "{}");
+    } catch {
+      updateUploadProgress(tempId, 100, "Ошибка");
+      showMessage("Сервер вернул неправильный ответ", true);
+      return;
+    }
+    if (xhr.status < 200 || xhr.status >= 300) {
+      updateUploadProgress(tempId, 100, "Ошибка");
+      showMessage(result.detail || "Ошибка загрузки файла", true);
+      return;
+    }
     for (const [key, value] of Object.entries(result.fields || {})) {
       const field = form.elements.namedItem(key);
       const clean = normalizeDealField(key, value);
-      if (field && !field.value && clean) field.value = clean;
+      if (field && !field.value && clean && isAllowedFieldForDocument(type, key)) field.value = clean;
     }
     state.highlightMissing = true;
     applyConfidence(result.field_meta || {});
@@ -155,18 +205,39 @@ async function uploadFiles(files, type = "other") {
     if (result.note) {
       appendRecognitionNote(type, result.note);
     }
-    state.documents.push({
+    state.documents = state.documents.map(doc => doc.id === tempId ? {
       id: result.document_id,
       document_type: result.effective_type || type,
       original_name: file.name,
       ocr_status: result.status,
       file_size: result.file_size || file.size,
-    });
+      progress: 100,
+    } : doc);
     renderDocuments();
     updateReadiness();
+    saveDeal(true).catch(err => showMessage(err.message, true));
+    showMessage(`${file.name}: сохранён и обработан`);
+  };
+  xhr.onerror = () => {
+    updateUploadProgress(tempId, 100, "Ошибка");
+    showMessage(`Не удалось загрузить ${file.name}`, true);
+  };
+  updateUploadProgress(tempId, 0, "Подготовка");
+  xhr.send(body);
+}
+
+function updateUploadProgress(id, progress, status) {
+  state.documents = state.documents.map(doc => doc.id === id ? { ...doc, progress, ocr_status: status } : doc);
+  renderDocuments();
+}
+
+function isAllowedFieldForDocument(type, key) {
+  if (type === "seller_passport") return key.startsWith("seller_");
+  if (type === "buyer_passport") return key.startsWith("buyer_");
+  if (["vehicle_docs", "pts", "sts"].includes(type)) {
+    return !key.startsWith("seller_") && !key.startsWith("buyer_") && !["price", "contract_date"].includes(key);
   }
-  await saveDeal(true);
-  showMessage("Документы сохранены. Проверьте заполненные поля.");
+  return true;
 }
 
 function renderDocuments() {
@@ -192,8 +263,9 @@ function renderDocuments() {
           ${docs.map(doc => `
             <div class="document-chip">
               <a href="/api/documents/${doc.id}" target="_blank">${escapeHtml(doc.original_name)}</a>
-              <small>${formatFileSize(doc.file_size)}</small>
-              <button class="icon-delete document-delete" type="button" title="Удалить документ" data-delete-document="${doc.id}">×</button>
+              <small>${isUploadPending(doc) ? `${doc.progress || 0}%` : formatFileSize(doc.file_size)}</small>
+              ${isUploadPending(doc) ? `<div class="upload-progress"><span style="width:${doc.progress || 0}%"></span></div>` : ""}
+              ${isUploadPending(doc) ? "" : `<button class="icon-delete document-delete" type="button" title="Удалить документ" data-delete-document="${doc.id}">×</button>`}
             </div>
           `).join("")}
         </div>
@@ -201,6 +273,10 @@ function renderDocuments() {
   }
   document.querySelector("#documentList").innerHTML = "";
   updateReadiness();
+}
+
+function isUploadPending(doc) {
+  return String(doc.id || "").startsWith("upload-") || (Number.isFinite(doc.progress) && doc.progress < 100);
 }
 
 async function deleteDocument(id) {
@@ -212,11 +288,44 @@ async function deleteDocument(id) {
 }
 
 async function deleteDeal(id) {
-  if (!confirm("Удалить сделку и все документы?")) return;
   await api(`/api/deals/${id}`, { method: "DELETE" });
   if (Number(state.dealId) === Number(id)) newDeal();
+  state.deleteConfirmId = null;
   await loadArchive(document.querySelector("#archiveSearch").value);
-  showMessage("Сделка удалена");
+  showMessage("Сделка перемещена в корзину");
+}
+
+async function loadTrash() {
+  const panel = document.querySelector("#trashPanel");
+  if (!panel) return;
+  const rows = await api("/api/deals-trash");
+  panel.innerHTML = `
+    <button class="trash-toggle" type="button" data-trash-toggle title="Корзина" aria-label="Корзина, удалённых договоров: ${rows.length}" aria-expanded="${state.trashOpen}">
+      <svg class="trash-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 10v6M14 10v6"/>
+      </svg>
+      <span class="trash-count">${rows.length}</span>
+      <svg class="trash-chevron ${state.trashOpen ? "open" : ""}" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="m9 18 6-6-6-6"/>
+      </svg>
+    </button>
+    <div class="trash-list ${state.trashOpen ? "" : "hidden"}">
+      ${rows.map(row => `
+        <div class="trash-item">
+          <strong>${escapeHtml(row.seller_full_name || "Без продавца")}</strong>
+          <span>${escapeHtml(row.vehicle_make_model || "Автомобиль не указан")}</span>
+          <small>${formatDeletedAt(row.deleted_at)}</small>
+          <button class="button restore-button" type="button" data-restore-deal="${row.id}">Восстановить</button>
+        </div>
+      `).join("") || `<p>Корзина пуста</p>`}
+    </div>
+  `;
+}
+
+async function restoreDeal(id) {
+  await api(`/api/deals/${id}/restore`, { method: "POST" });
+  await loadArchive(document.querySelector("#archiveSearch").value);
+  showMessage("Сделка восстановлена");
 }
 
 async function makeContract() {
@@ -310,9 +419,9 @@ function updateReadiness() {
   }
 
   const chips = [
-    `<span class="check-chip ${readiness.documentsDone ? "done" : "warn"}">Документы: ${state.documents.length}</span>`,
+    `<button type="button" class="check-chip ${readiness.documentsDone ? "done" : "warn"}" data-scroll-target="section-documents">Документы: ${state.documents.length}</button>`,
     ...readiness.checks.map(item =>
-      `<span class="check-chip ${item.done ? "done" : "warn"}">${item.label}: ${item.filled}/${item.total}</span>`
+      `<button type="button" class="check-chip ${item.done ? "done" : "warn"}" data-scroll-target="${item.target}">${item.label}: ${item.filled}/${item.total}</button>`
     ),
   ];
   list.innerHTML = chips.join("");
@@ -323,8 +432,38 @@ function archiveBadge(row) {
   const filled = totalFields.filter(name => String(row[name] || "").trim()).length;
   const ratio = filled / totalFields.length;
   if (ratio >= .85) return `<span class="status-badge status-ready">Готов</span>`;
-  if (ratio >= .35) return `<span class="status-badge status-check">Проверить</span>`;
   return `<span class="status-badge status-draft">Черновик</span>`;
+}
+
+function scrollToSection(targetId) {
+  const target = document.getElementById(targetId);
+  if (!target) return;
+  target.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function clearSection(section) {
+  if (section === "documents") {
+    const savedDocuments = state.documents.filter(doc => !isUploadPending(doc));
+    await Promise.all(savedDocuments.map(doc => api(`/api/documents/${doc.id}`, { method: "DELETE" })));
+    state.documents = state.documents.filter(isUploadPending);
+    renderDocuments();
+    showMessage("Загруженные документы удалены");
+    return;
+  }
+  for (const name of sectionFields[section] || []) {
+    const field = form.elements.namedItem(name);
+    if (field) field.value = "";
+  }
+  markMissingFields();
+  updateReadiness();
+  showMessage("Поля раздела очищены");
+}
+
+function formatDeletedAt(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return `Удалено: ${value}`;
+  return `Удалено: ${date.toLocaleDateString("ru-RU")} ${date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`;
 }
 
 function todayLocal() {
@@ -369,6 +508,30 @@ function formatSeriesNumber(value) {
   return raw;
 }
 
+function formatStsNumber(value) {
+  const raw = String(value || "")
+    .toUpperCase()
+    .replace(/[^0-9А-ЯA-Z]/g, "")
+    .replace(/[ABEKMHOPCTYX]/g, char => plateLatinToCyrillic[char] || char);
+  const digits = raw.replace(/\D/g, "");
+  if (/^\d{10}$/.test(raw)) return `${raw.slice(0, 4)} ${raw.slice(4, 10)}`;
+  if (/^\d{2}[А-Я]{2}\d{6}$/.test(raw)) return `${raw.slice(0, 4)} ${raw.slice(4, 10)}`;
+  if (digits.length === 10) return `${digits.slice(0, 4)} ${digits.slice(4, 10)}`;
+  return raw.slice(0, 10);
+}
+
+function formatPtsNumber(value) {
+  const raw = String(value || "")
+    .toUpperCase()
+    .replace(/[^0-9А-ЯA-Z]/g, "")
+    .replace(/[ABEKMHOPCTYX]/g, char => plateLatinToCyrillic[char] || char);
+  const digits = raw.replace(/\D/g, "");
+  if (digits.length === 15) return digits;
+  if (/^\d{2}[А-Я]{2}\d{6}$/.test(raw)) return `${raw.slice(0, 4)} ${raw.slice(4, 10)}`;
+  if (digits.length === 8) return `${digits.slice(0, 4)} ${digits.slice(4, 8)}`;
+  return raw.slice(0, 15);
+}
+
 function normalizePlate(value) {
   return String(value || "")
     .toUpperCase()
@@ -381,7 +544,9 @@ function normalizePlate(value) {
 function normalizeDealField(key, value) {
   if (value === null || value === undefined) return "";
   if (key.endsWith("_phone")) return formatPhone(value);
-  if (["seller_passport", "buyer_passport", "pts_series_number", "sts_series_number"].includes(key)) return formatSeriesNumber(value);
+  if (["seller_passport", "buyer_passport"].includes(key)) return formatSeriesNumber(value);
+  if (key === "sts_series_number") return formatStsNumber(value);
+  if (key === "pts_series_number") return formatPtsNumber(value);
   if (key === "registration_plate") return normalizePlate(value);
   if (key === "vehicle_type") return String(value || "B/M1").trim() || "B/M1";
   if (key === "vin") return String(value).toUpperCase().replace(/[^A-HJ-NPR-Z0-9]/g, "").slice(0, 17);
@@ -390,7 +555,7 @@ function normalizeDealField(key, value) {
 
 function noteFieldForType(type) {
   if (type === "buyer_passport") return "buyer_notes";
-  if (["pts", "sts", "old_contract", "auto"].includes(type)) return "vehicle_notes";
+  if (["vehicle_docs", "pts", "sts", "old_contract", "auto"].includes(type)) return "vehicle_notes";
   return "seller_notes";
 }
 
@@ -442,23 +607,62 @@ document.querySelector("#documentList").addEventListener("click", e => {
 });
 document.querySelector("#archiveSearch").addEventListener("input", e => loadArchive(e.target.value).catch(err => showMessage(err.message, true)));
 document.querySelector("#archiveList").addEventListener("click", e => {
+  const confirmButton = e.target.closest("[data-confirm-delete-deal]");
+  if (confirmButton) {
+    e.preventDefault();
+    e.stopPropagation();
+    deleteDeal(Number(confirmButton.dataset.confirmDeleteDeal)).catch(err => showMessage(err.message, true));
+    return;
+  }
+  const cancelButton = e.target.closest("[data-cancel-delete]");
+  if (cancelButton) {
+    e.preventDefault();
+    e.stopPropagation();
+    state.deleteConfirmId = null;
+    loadArchive(document.querySelector("#archiveSearch").value).catch(err => showMessage(err.message, true));
+    return;
+  }
   const deleteButton = e.target.closest("[data-delete-deal]");
   if (deleteButton) {
     e.preventDefault();
     e.stopPropagation();
-    deleteDeal(Number(deleteButton.dataset.deleteDeal)).catch(err => showMessage(err.message, true));
+    state.deleteConfirmId = Number(deleteButton.dataset.deleteDeal);
+    loadArchive(document.querySelector("#archiveSearch").value).catch(err => showMessage(err.message, true));
     return;
   }
   const item = e.target.closest(".archive-item");
   if (item) openDeal(Number(item.dataset.id)).catch(err => showMessage(err.message, true));
 });
+document.querySelector("#trashPanel").addEventListener("click", e => {
+  const toggle = e.target.closest("[data-trash-toggle]");
+  if (toggle) {
+    state.trashOpen = !state.trashOpen;
+    loadTrash().catch(err => showMessage(err.message, true));
+    return;
+  }
+  const restoreButton = e.target.closest("[data-restore-deal]");
+  if (restoreButton) {
+    restoreDeal(Number(restoreButton.dataset.restoreDeal)).catch(err => showMessage(err.message, true));
+  }
+});
+document.querySelector("#readinessChecks").addEventListener("click", e => {
+  const button = e.target.closest("[data-scroll-target]");
+  if (button) scrollToSection(button.dataset.scrollTarget);
+});
+document.querySelector(".workspace").addEventListener("click", e => {
+  const button = e.target.closest("[data-clear-section]");
+  if (!button) return;
+  clearSection(button.dataset.clearSection).catch(err => showMessage(err.message, true));
+});
 form.addEventListener("input", e => {
   const field = e.target;
   if (!field.name) return updateReadiness();
   if (field.name.endsWith("_phone")) field.value = formatPhone(field.value);
-  if (["seller_passport", "buyer_passport", "pts_series_number", "sts_series_number"].includes(field.name)) {
+  if (["seller_passport", "buyer_passport"].includes(field.name)) {
     field.value = formatSeriesNumber(field.value);
   }
+  if (field.name === "sts_series_number") field.value = formatStsNumber(field.value);
+  if (field.name === "pts_series_number") field.value = formatPtsNumber(field.value);
   if (field.name === "registration_plate") field.value = normalizePlate(field.value);
   if (field.name === "vin") field.value = normalizeDealField("vin", field.value);
   markMissingFields();
