@@ -1,7 +1,15 @@
 ﻿const state = { dealId: null, documents: [], highlightMissing: false, deleteConfirmId: null, trashOpen: false };
 const form = document.querySelector("#dealForm");
+state.nextContractNumber = 1;
+state.contractNumberAuto = true;
+state.recognitionActive = 0;
+state.recognitionQueue = [];
+state.recognitionJobs = new Map();
+state.globalRecognitionCount = 0;
 state.trashDeleteConfirmId = null;
 const message = document.querySelector("#message");
+const recognitionProgress = document.querySelector("#recognitionProgress");
+const recognitionStage = document.querySelector("#recognitionStage");
 const documentLabels = {
   seller_passport: "Паспорт продавца",
   buyer_passport: "Паспорт покупателя",
@@ -19,12 +27,18 @@ const readinessGroups = [
   { label: "Автомобиль", target: "section-vehicle", fields: ["vehicle_make_model", "vin", "pts_series_number", "sts_series_number"] },
 ];
 const sectionFields = {
-  contract: ["contract_date", "contract_place", "price"],
+  contract: ["contract_number", "contract_date", "contract_place", "price"],
   seller: ["seller_full_name", "seller_birth_date", "seller_phone", "seller_passport", "seller_passport_issue_date", "seller_passport_issued_by", "seller_address"],
   buyer: ["buyer_full_name", "buyer_birth_date", "buyer_phone", "buyer_passport", "buyer_passport_issue_date", "buyer_passport_issued_by", "buyer_address"],
   vehicle: ["vehicle_make_model", "vehicle_type", "vehicle_year", "vin", "body_number", "chassis_number", "color", "registration_plate", "pts_series_number", "sts_series_number"],
   notes: ["seller_notes", "buyer_notes", "vehicle_notes", "notes"],
 };
+const recognizableFields = new Set([
+  ...sectionFields.contract,
+  ...sectionFields.seller,
+  ...sectionFields.buyer,
+  ...sectionFields.vehicle,
+]);
 const requiredAfterRecognition = [
   "contract_date", "contract_place",
   "seller_full_name", "seller_birth_date", "seller_passport", "seller_passport_issue_date", "seller_passport_issued_by", "seller_address",
@@ -42,7 +56,7 @@ const uploadHintByType = {
   other: "Любые вложения",
 };
 
-function showMessage(text, error = false, action = null, duration = 5000) {
+function showMessage(text, error = false, action = null, duration = 3000) {
   message.replaceChildren();
   const label = document.createElement("span");
   label.textContent = text;
@@ -59,6 +73,180 @@ function showMessage(text, error = false, action = null, duration = 5000) {
   showMessage.timer = setTimeout(() => message.classList.add("hidden"), duration);
 }
 
+function startRecognitionProgress() {
+  clearInterval(startRecognitionProgress.timer);
+  recognitionProgress.classList.remove("hidden");
+  recognitionProgress.classList.remove("waiting");
+  const bar = recognitionProgress.querySelector(".recognition-progress-bar");
+  let percent = 8;
+  bar.style.width = `${percent}%`;
+  recognitionStage.textContent = "Подготовка документов";
+  startRecognitionProgress.timer = setInterval(() => {
+    percent = Math.min(88, percent + (percent < 45 ? 7 : 3));
+    bar.style.width = `${percent}%`;
+    recognitionStage.textContent = percent < 35
+      ? "Отправка в OpenRouter"
+      : percent < 70
+        ? "Чтение документов"
+        : "Сверка и заполнение полей";
+    if (percent >= 88) {
+      recognitionProgress.classList.add("waiting");
+      recognitionStage.textContent = "Ожидание ответа OpenRouter";
+    }
+  }, 900);
+}
+
+function finishRecognitionProgress(error = false) {
+  clearInterval(startRecognitionProgress.timer);
+  const bar = recognitionProgress.querySelector(".recognition-progress-bar");
+  recognitionProgress.classList.remove("waiting");
+  bar.style.background = error ? "var(--red)" : "var(--accent)";
+  bar.style.width = "100%";
+  recognitionStage.textContent = error ? "Ошибка распознавания" : "Готово";
+  setTimeout(() => {
+    recognitionProgress.classList.add("hidden");
+    bar.style.width = "0";
+    bar.style.background = "";
+  }, 500);
+}
+
+function beginGlobalRecognition() {
+  state.globalRecognitionCount += 1;
+  if (state.globalRecognitionCount === 1) startRecognitionProgress();
+}
+
+function endGlobalRecognition(error = false) {
+  state.globalRecognitionCount = Math.max(0, state.globalRecognitionCount - 1);
+  if (state.globalRecognitionCount === 0) finishRecognitionProgress(error);
+}
+
+function recognitionIndicator(dealId) {
+  const job = state.recognitionJobs.get(Number(dealId));
+  if (!job) return "";
+  const label = job.status === "queued"
+    ? "В очереди"
+    : job.status === "done"
+      ? "Готово"
+      : job.waiting
+        ? "Ожидание ответа OpenRouter"
+        : "Распознавание";
+  const progressText = job.waiting ? "…" : `${Math.round(job.percent || 0)}%`;
+  return `<div class="archive-recognition ${job.waiting ? "waiting" : ""}" title="${label}">
+    <div><span>${label}</span><small>${progressText}</small></div>
+    <i><b style="width:${job.percent || 0}%"></b></i>
+  </div>`;
+}
+
+function updateRecognitionIndicator(job) {
+  const node = document.querySelector(`.archive-item[data-id="${job.dealId}"] .archive-recognition`);
+  if (!node) return;
+  const label = job.status === "queued"
+    ? "В очереди"
+    : job.status === "done"
+      ? "Готово"
+      : job.waiting
+        ? "Ожидание ответа OpenRouter"
+        : "Распознавание";
+  node.classList.toggle("waiting", Boolean(job.waiting));
+  node.querySelector("span").textContent = label;
+  node.querySelector("small").textContent = job.waiting ? "…" : `${Math.round(job.percent || 0)}%`;
+  node.querySelector("b").style.width = `${job.percent || 0}%`;
+}
+
+function acquireRecognitionSlot(job) {
+  if (state.recognitionActive < 2) {
+    state.recognitionActive += 1;
+    return Promise.resolve();
+  }
+  job.status = "queued";
+  job.percent = 3;
+  updateRecognitionIndicator(job);
+  return new Promise(resolve => state.recognitionQueue.push(resolve));
+}
+
+function releaseRecognitionSlot() {
+  state.recognitionActive = Math.max(0, state.recognitionActive - 1);
+  const next = state.recognitionQueue.shift();
+  if (next) {
+    state.recognitionActive += 1;
+    next();
+  }
+}
+
+function startDealProgress(job) {
+  job.status = "working";
+  job.percent = 8;
+  job.waiting = false;
+  updateRecognitionIndicator(job);
+  job.timer = setInterval(() => {
+    job.percent = Math.min(86, job.percent + (job.percent < 50 ? 6 : 2));
+    if (job.percent >= 86) job.waiting = true;
+    updateRecognitionIndicator(job);
+  }, 900);
+}
+
+function syncRecognitionButtons() {
+  const busy = Boolean(state.dealId && state.recognitionJobs.has(Number(state.dealId)));
+  document.querySelectorAll("#reprocessDeal, [data-reprocess-section], [data-recognize-field]").forEach(button => {
+    button.disabled = busy;
+    button.classList.toggle("loading", busy);
+    if (button.matches("[data-recognize-field]")) {
+      button.textContent = busy ? "…" : "↻";
+      return;
+    }
+    const label = button.querySelector(".reprocess-label");
+    if (label) label.textContent = busy ? "Распознаю..." : "Распознать заново";
+    else button.textContent = busy ? "Распознаю..." : "Распознать";
+  });
+}
+
+function installFieldRecognitionButtons() {
+  for (const fieldName of recognizableFields) {
+    const field = form.elements.namedItem(fieldName);
+    const label = field?.closest("label");
+    if (!field || !label || label.querySelector("[data-recognize-field]")) continue;
+    field.classList.add("has-field-recognize");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "field-recognize";
+    button.dataset.recognizeField = fieldName;
+    button.title = "Распознать только это поле";
+    button.setAttribute("aria-label", `Распознать поле ${fieldName}`);
+    button.textContent = "↻";
+    label.appendChild(button);
+  }
+}
+
+function clearFieldChoices(fieldNames = []) {
+  for (const fieldName of fieldNames) {
+    const field = form.elements.namedItem(fieldName);
+    field?.closest("label")?.querySelector(".field-choices")?.remove();
+  }
+}
+
+function showFieldConflicts(conflicts = {}) {
+  for (const [fieldName, options] of Object.entries(conflicts)) {
+    const field = form.elements.namedItem(fieldName);
+    const label = field?.closest("label");
+    if (!field || !label || !Array.isArray(options) || options.length < 2) continue;
+    clearFieldChoices([fieldName]);
+    const panel = document.createElement("div");
+    panel.className = "field-choices";
+    const title = document.createElement("strong");
+    title.textContent = "Найдены разные варианты — выберите:";
+    panel.appendChild(title);
+    for (const option of options) {
+      const choice = document.createElement("button");
+      choice.type = "button";
+      choice.dataset.fieldChoice = fieldName;
+      choice.dataset.fieldValue = option.value;
+      choice.textContent = `${option.value} · подтверждений: ${option.support}`;
+      panel.appendChild(choice);
+    }
+    label.appendChild(panel);
+  }
+}
+
 function formData() {
   const data = Object.fromEntries(new FormData(form).entries());
   for (const key of Object.keys(data)) data[key] = normalizeDealField(key, data[key]);
@@ -68,6 +256,8 @@ function formData() {
 
 function setForm(data = {}) {
   form.reset();
+  data.vin = data.vin || "ОТСУТСТВУЕТ";
+  data.chassis_number = data.chassis_number || "ОТСУТСТВУЕТ";
   if (data.notes && !data.seller_notes && !data.buyer_notes && !data.vehicle_notes) {
     data.seller_notes = data.notes;
   }
@@ -97,6 +287,17 @@ function markMissingFields() {
     if (!field || field.name.endsWith("_phone")) continue;
     if (!String(field.value || "").trim()) field.classList.add("field-missing");
   }
+  validateVehicleIdentityFields();
+}
+
+function validateVehicleIdentityFields() {
+  const vin = form.elements.namedItem("vin");
+  const chassis = form.elements.namedItem("chassis_number");
+  const absent = value => String(value || "").trim().toUpperCase() === "ОТСУТСТВУЕТ";
+  const validVin = value => /^[A-HJ-NPR-Z0-9]{17}$/.test(String(value || "").trim().toUpperCase());
+  const validChassis = value => /^[A-ZА-Я0-9-]{5,30}$/.test(String(value || "").trim().toUpperCase());
+  vin.classList.toggle("field-missing", !absent(vin.value) && !validVin(vin.value));
+  chassis.classList.toggle("field-missing", !absent(chassis.value) && !validChassis(chassis.value));
 }
 
 function applyConfidence(meta = {}) {
@@ -106,7 +307,11 @@ function applyConfidence(meta = {}) {
 async function api(url, options = {}) {
   const response = await fetch(url, options);
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.detail || "Ошибка приложения");
+  if (!response.ok) {
+    const error = new Error(body.detail || "Ошибка приложения");
+    error.status = response.status;
+    throw error;
+  }
   return body;
 }
 
@@ -117,7 +322,7 @@ async function saveDeal(silent = false) {
     body: JSON.stringify({ deal_id: state.dealId, data: formData() }),
   });
   state.dealId = result.id;
-  document.querySelector("#dealBadge").textContent = `ДКП №${result.id}`;
+  document.querySelector("#dealBadge").textContent = `№${form.elements.namedItem("contract_number").value || result.id}`;
   if (!silent) showMessage("Карточка сохранена");
   await loadArchive();
   return result.id;
@@ -125,14 +330,18 @@ async function saveDeal(silent = false) {
 
 async function loadArchive(query = "") {
   const rows = await api(`/api/deals?q=${encodeURIComponent(query)}`);
+  const numericNumbers = rows.map(row => Number(row.contract_number || row.id)).filter(Number.isFinite);
+  state.nextContractNumber = Math.max(0, ...numericNumbers) + 1;
+  const numberField = form.elements.namedItem("contract_number");
+  if (!state.dealId && state.contractNumberAuto) numberField.value = state.nextContractNumber;
   const list = document.querySelector("#archiveList");
   list.innerHTML = rows.map(row => `
     <div class="archive-item ${row.id === state.dealId ? "active" : ""}" data-id="${row.id}">
       <div class="archive-head">
-        <span class="archive-number">ДКП №${row.id}</span>
-        <strong>${escapeHtml(row.buyer_full_name || row.seller_full_name || "Без имени")}</strong>
+        <span class="archive-number">№${escapeHtml(row.contract_number || row.id)}</span>
         ${archiveBadge(row)}
       </div>
+      <strong class="archive-person">${escapeHtml(row.buyer_full_name || row.seller_full_name || "Без имени")}</strong>
       ${state.deleteConfirmId === row.id ? `
         <div class="archive-confirm">
           <button class="cancel-delete" type="button" title="Отмена" data-cancel-delete>×</button>
@@ -141,6 +350,7 @@ async function loadArchive(query = "") {
       ` : `<button class="icon-delete archive-delete" type="button" title="Удалить сделку" data-delete-deal="${row.id}">×</button>`}
       <span>${escapeHtml(row.vehicle_make_model || "Автомобиль не указан")}</span>
       <span>${escapeHtml([row.registration_plate, row.vin].filter(Boolean).join(" · "))}</span>
+      ${recognitionIndicator(row.id)}
     </div>`).join("") || "<p>Архив пока пуст</p>";
   await loadTrash();
 }
@@ -148,27 +358,54 @@ async function loadArchive(query = "") {
 async function openDeal(id) {
   const data = await api(`/api/deals/${id}`);
   state.dealId = id;
+  state.contractNumberAuto = false;
   setForm(data);
-  document.querySelector("#dealBadge").textContent = `ДКП №${id}`;
+  document.querySelector("#dealBadge").textContent = `№${data.contract_number || id}`;
+  syncRecognitionButtons();
   await loadArchive(document.querySelector("#archiveSearch").value);
 }
 
-function newDeal() {
+async function newDeal() {
   state.dealId = null;
+  state.contractNumberAuto = true;
   state.documents = [];
   setForm({ contract_date: todayLocal(), contract_place: "Якутск" });
+  const numberField = form.elements.namedItem("contract_number");
+  numberField.value = state.nextContractNumber || 1;
+  const fallbackNumber = numberField.value;
+  try {
+    const next = await api("/api/deals-next-number");
+    if (!state.dealId && state.contractNumberAuto && numberField.value === fallbackNumber) {
+      numberField.value = next.contract_number;
+      state.nextContractNumber = Number(next.contract_number) || state.nextContractNumber;
+    }
+  } catch {
+    // Сохраняем номер, уже вычисленный по загруженному архиву.
+  }
   document.querySelector("#dealBadge").textContent = "Новая";
+  syncRecognitionButtons();
   document.querySelectorAll(".archive-item").forEach(x => x.classList.remove("active"));
 }
 
 async function uploadFiles(files, type = "other") {
   if (!files.length) return;
   if (!state.dealId) await saveDeal(true);
+  const dealId = Number(state.dealId);
   showMessage(`Добавлено файлов: ${files.length}`);
-  files.forEach(file => uploadOneFile(file, type));
+  startRecognitionProgress();
+  try {
+    for (let index = 0; index < files.length; index += 1) {
+      await uploadOneFile(files[index], type, index < files.length - 1, dealId);
+    }
+    finishRecognitionProgress();
+  } catch (error) {
+    finishRecognitionProgress(true);
+    throw error;
+  }
 }
 
-function uploadOneFile(file, type = "other") {
+function uploadOneFile(file, type = "other", deferRecognition = false, dealId = Number(state.dealId)) {
+  return new Promise((resolve, reject) => {
   const tempId = `upload-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   state.documents.push({
     id: tempId,
@@ -182,10 +419,11 @@ function uploadOneFile(file, type = "other") {
 
   const body = new FormData();
   body.append("document_type", type);
+  body.append("defer_ocr", deferRecognition ? "true" : "false");
   body.append("file", file);
 
   const xhr = new XMLHttpRequest();
-  xhr.open("POST", `/api/deals/${state.dealId}/documents`);
+  xhr.open("POST", `/api/deals/${dealId}/documents`);
   xhr.upload.onprogress = event => {
     if (!event.lengthComputable) return;
     updateUploadProgress(tempId, Math.round((event.loaded / event.total) * 100), "Загрузка");
@@ -198,43 +436,53 @@ function uploadOneFile(file, type = "other") {
     } catch {
       updateUploadProgress(tempId, 100, "Ошибка");
       showMessage("Сервер вернул неправильный ответ", true);
+      reject(new Error("Сервер вернул неправильный ответ"));
       return;
     }
     if (xhr.status < 200 || xhr.status >= 300) {
       updateUploadProgress(tempId, 100, "Ошибка");
       showMessage(result.detail || "Ошибка загрузки файла", true);
+      reject(new Error(result.detail || "Ошибка загрузки файла"));
       return;
     }
-    for (const [key, value] of Object.entries(result.fields || {})) {
-      const field = form.elements.namedItem(key);
-      const clean = normalizeDealField(key, value);
-      if (field && !field.value && clean && isAllowedFieldForDocument(type, key)) field.value = clean;
+    if (Number(state.dealId) === dealId) {
+      clearFieldChoices([
+        ...Object.keys(result.fields || {}),
+        ...Object.keys(result.conflicts || {}),
+      ]);
+      for (const [key, value] of Object.entries(result.fields || {})) {
+        const field = form.elements.namedItem(key);
+        const clean = normalizeDealField(key, value);
+        if (field && clean && isAllowedFieldForDocument(type, key)) field.value = clean;
+      }
+      state.highlightMissing = true;
+      applyConfidence(result.field_meta || {});
+      updateReadiness();
+      if (result.note) appendRecognitionNote(type, result.note);
+      showFieldConflicts(result.conflicts || {});
+      state.documents = state.documents.map(doc => doc.id === tempId ? {
+        id: result.document_id,
+        document_type: result.effective_type || type,
+        original_name: file.name,
+        ocr_status: result.status,
+        file_size: result.file_size || file.size,
+        progress: 100,
+      } : doc);
+      renderDocuments();
+      updateReadiness();
     }
-    state.highlightMissing = true;
-    applyConfidence(result.field_meta || {});
-    updateReadiness();
-    if (result.note) {
-      appendRecognitionNote(type, result.note);
-    }
-    state.documents = state.documents.map(doc => doc.id === tempId ? {
-      id: result.document_id,
-      document_type: result.effective_type || type,
-      original_name: file.name,
-      ocr_status: result.status,
-      file_size: result.file_size || file.size,
-      progress: 100,
-    } : doc);
-    renderDocuments();
-    updateReadiness();
-    saveDeal(true).catch(err => showMessage(err.message, true));
+    loadArchive(document.querySelector("#archiveSearch").value).catch(() => {});
     showMessage(`${file.name}: сохранён и обработан`);
+    resolve(result);
   };
   xhr.onerror = () => {
     updateUploadProgress(tempId, 100, "Ошибка");
     showMessage(`Не удалось загрузить ${file.name}`, true);
+    reject(new Error(`Не удалось загрузить ${file.name}`));
   };
   updateUploadProgress(tempId, 0, "Подготовка");
   xhr.send(body);
+  });
 }
 
 function updateUploadProgress(id, progress, status) {
@@ -333,7 +581,7 @@ async function loadTrash() {
     <div class="trash-list ${state.trashOpen ? "" : "hidden"}">
       ${rows.map(row => `
         <div class="trash-item">
-          <span class="trash-deal-number">ДКП №${row.id}</span>
+          <span class="trash-deal-number">№${escapeHtml(row.contract_number || row.id)}</span>
           <strong>${escapeHtml(row.seller_full_name || "Без продавца")}</strong>
           <span>${escapeHtml(row.vehicle_make_model || "Автомобиль не указан")}</span>
           <small>${formatDeletedAt(row.deleted_at)}</small>
@@ -368,11 +616,11 @@ async function makeContract() {
   if (button.disabled) return;
   button.disabled = true;
   const originalText = button.textContent;
-  button.textContent = "Создаю...";
+  button.textContent = "Формирую Excel...";
   try {
     await saveDeal(true);
     const result = await api(`/api/deals/${state.dealId}/contract`, { method: "POST" });
-    showMessage("ДКП создан. Копия сохранена в data/contracts");
+    showMessage("Excel-файл создан по печатному шаблону");
     window.location.href = result.download_url;
   } finally {
     button.disabled = false;
@@ -380,35 +628,139 @@ async function makeContract() {
   }
 }
 
-async function reprocessDeal() {
+async function reprocessDeal(section = "all", triggerButton = null) {
   if (!state.dealId) {
     showMessage("Сначала сохраните сделку и загрузите документы", true);
     return;
   }
-  const button = document.querySelector("#reprocessDeal");
+  const completedDocuments = state.documents.filter(document => !isUploadPending(document));
+  if (!completedDocuments.length) {
+    showMessage("Нет документов для распознавания", true);
+    return;
+  }
+  await saveDeal(true);
+  const dealId = Number(state.dealId);
+  if (state.recognitionJobs.has(dealId)) {
+    showMessage("Этот ДКП уже распознаётся или ожидает своей очереди");
+    return;
+  }
+  const button = triggerButton || document.querySelector("#reprocessDeal");
+  const job = { dealId, section, status: "queued", percent: 3, timer: null };
+  state.recognitionJobs.set(dealId, job);
+  syncRecognitionButtons();
   button.disabled = true;
   button.classList.add("loading");
   button.setAttribute("aria-label", "Распознаю документы");
   const label = button.querySelector(".reprocess-label");
+  const originalText = button.textContent;
+  let succeeded = false;
+  await loadArchive(document.querySelector("#archiveSearch").value);
+  await acquireRecognitionSlot(job);
+  startDealProgress(job);
+  beginGlobalRecognition();
   if (label) label.textContent = "Распознаю...";
   try {
-    const result = await api(`/api/deals/${state.dealId}/reprocess`, { method: "POST" });
-    for (const [key, value] of Object.entries(result.fields || {})) {
-      const field = form.elements.namedItem(key);
-      const clean = normalizeDealField(key, value);
-      if (field && clean) field.value = clean;
+    const result = await api(`/api/deals/${dealId}/reprocess?section=${encodeURIComponent(section)}`, { method: "POST" });
+    if (Number(state.dealId) === dealId) {
+      clearFieldChoices([
+        ...Object.keys(result.fields || {}),
+        ...Object.keys(result.conflicts || {}),
+      ]);
+      for (const [key, value] of Object.entries(result.fields || {})) {
+        const field = form.elements.namedItem(key);
+        const clean = normalizeDealField(key, value);
+        if (field && clean) field.value = clean;
+      }
+      state.highlightMissing = true;
+      applyConfidence(result.field_meta || {});
+      if (section === "all" || section === "notes") setRecognitionNotes(result.notes_by_group || {}, result.notes || "");
+      updateReadiness();
+      showFieldConflicts(result.conflicts || {});
     }
-    state.highlightMissing = true;
-    applyConfidence(result.field_meta || {});
-    setRecognitionNotes(result.notes_by_group || {}, result.notes || "");
-    updateReadiness();
-    await saveDeal(true);
-    showMessage(`Обработано документов: ${result.processed}. Проверьте заполненные поля.`);
+    showMessage(`Раздел распознан. Обработано документов: ${result.processed}.`);
+    succeeded = true;
   } finally {
+    clearInterval(job.timer);
+    job.status = "done";
+    job.percent = 100;
+    job.waiting = false;
+    updateRecognitionIndicator(job);
+    endGlobalRecognition(!succeeded);
+    releaseRecognitionSlot();
+    await loadArchive(document.querySelector("#archiveSearch").value).catch(() => {});
+    setTimeout(() => {
+      state.recognitionJobs.delete(dealId);
+      syncRecognitionButtons();
+      loadArchive(document.querySelector("#archiveSearch").value).catch(() => {});
+    }, 1200);
     button.disabled = false;
     button.classList.remove("loading");
     if (label) label.textContent = "Распознать заново";
+    if (!label) button.textContent = originalText;
     button.setAttribute("aria-label", "Распознать документы заново");
+    syncRecognitionButtons();
+  }
+}
+
+async function reprocessSingleField(fieldName, button) {
+  if (!state.dealId) {
+    showMessage("Сначала создайте и сохраните ДКП", true);
+    return;
+  }
+  const completedDocuments = state.documents.filter(document => !isUploadPending(document));
+  if (!completedDocuments.length) {
+    showMessage("Нет документов для распознавания", true);
+    return;
+  }
+  await saveDeal(true);
+  const dealId = Number(state.dealId);
+  if (state.recognitionJobs.has(dealId)) {
+    showMessage("Этот ДКП уже распознаётся или ожидает своей очереди");
+    return;
+  }
+
+  const job = { dealId, section: `field:${fieldName}`, status: "queued", percent: 3, waiting: false, timer: null };
+  state.recognitionJobs.set(dealId, job);
+  syncRecognitionButtons();
+  await loadArchive(document.querySelector("#archiveSearch").value);
+  await acquireRecognitionSlot(job);
+  startDealProgress(job);
+  beginGlobalRecognition();
+  let succeeded = false;
+  try {
+    const result = await api(
+      `/api/deals/${dealId}/reprocess-field?field_name=${encodeURIComponent(fieldName)}`,
+      { method: "POST" },
+    );
+    const value = result.fields?.[fieldName];
+    if (value && Number(state.dealId) === dealId) {
+      const field = form.elements.namedItem(fieldName);
+      field.value = normalizeDealField(fieldName, value);
+      markMissingFields();
+      updateReadiness();
+    }
+    if (Number(state.dealId) === dealId) {
+      clearFieldChoices([fieldName]);
+      showFieldConflicts(result.conflicts || {});
+    }
+    showMessage(value ? "Поле обновлено" : "Поле не удалось надёжно распознать");
+    succeeded = true;
+  } finally {
+    clearInterval(job.timer);
+    job.status = "done";
+    job.percent = 100;
+    job.waiting = false;
+    updateRecognitionIndicator(job);
+    endGlobalRecognition(!succeeded);
+    releaseRecognitionSlot();
+    await loadArchive(document.querySelector("#archiveSearch").value).catch(() => {});
+    setTimeout(() => {
+      state.recognitionJobs.delete(dealId);
+      syncRecognitionButtons();
+      loadArchive(document.querySelector("#archiveSearch").value).catch(() => {});
+    }, 1200);
+    button.disabled = false;
+    syncRecognitionButtons();
   }
 }
 
@@ -467,7 +819,7 @@ function archiveBadge(row) {
   const totalFields = readinessGroups.flatMap(group => group.fields);
   const filled = totalFields.filter(name => String(row[name] || "").trim()).length;
   const ratio = filled / totalFields.length;
-  if (ratio >= .85) return `<span class="status-badge status-ready">Готов</span>`;
+  if (ratio >= .85) return "";
   return `<span class="status-badge status-draft">Черновик</span>`;
 }
 
@@ -488,7 +840,7 @@ async function clearSection(section) {
   }
   for (const name of sectionFields[section] || []) {
     const field = form.elements.namedItem(name);
-    if (field) field.value = "";
+    if (field) field.value = ["vin", "chassis_number"].includes(name) ? "ОТСУТСТВУЕТ" : "";
   }
   markMissingFields();
   updateReadiness();
@@ -585,7 +937,11 @@ function normalizeDealField(key, value) {
   if (key === "pts_series_number") return formatPtsNumber(value);
   if (key === "registration_plate") return normalizePlate(value);
   if (key === "vehicle_type") return String(value || "B/M1").trim() || "B/M1";
-  if (key === "vin") return String(value).toUpperCase().replace(/[^A-HJ-NPR-Z0-9]/g, "").slice(0, 17);
+  if (key === "vin") {
+    const text = String(value).trim().toUpperCase();
+    if (text === "ОТСУТСТВУЕТ") return text;
+    return text.replace(/[^A-HJ-NPR-Z0-9]/g, "").slice(0, 17);
+  }
   return String(value).trim();
 }
 
@@ -607,9 +963,9 @@ function setRecognitionNotes(groups = {}, fallback = "") {
 }
 
 document.querySelector("#saveDeal").addEventListener("click", () => saveDeal().catch(e => showMessage(e.message, true)));
-document.querySelector("#newDeal").addEventListener("click", newDeal);
+document.querySelector("#topNewDeal").addEventListener("click", () => newDeal().catch(err => showMessage(err.message, true)));
 document.querySelector("#makeContract").addEventListener("click", () => makeContract().catch(e => showMessage(e.message, true)));
-document.querySelector("#reprocessDeal").addEventListener("click", () => reprocessDeal().catch(e => showMessage(e.message, true)));
+document.querySelector("#reprocessDeal").addEventListener("click", e => reprocessDeal("all", e.currentTarget).catch(err => showMessage(err.message, true)));
 document.querySelector("#sidebarToggle").addEventListener("click", () => {
   document.body.classList.toggle("sidebar-collapsed");
   const collapsed = document.body.classList.contains("sidebar-collapsed");
@@ -702,6 +1058,36 @@ document.querySelector("#readinessChecks").addEventListener("click", e => {
   if (button) scrollToSection(button.dataset.scrollTarget);
 });
 document.querySelector(".workspace").addEventListener("click", e => {
+  const choiceButton = e.target.closest("[data-field-choice]");
+  if (choiceButton) {
+    const fieldName = choiceButton.dataset.fieldChoice;
+    const field = form.elements.namedItem(fieldName);
+    if (field) {
+      field.value = normalizeDealField(fieldName, choiceButton.dataset.fieldValue);
+      clearFieldChoices([fieldName]);
+      markMissingFields();
+      updateReadiness();
+      saveDeal(true).then(() => showMessage("Выбранный вариант сохранён")).catch(err => showMessage(err.message, true));
+    }
+    return;
+  }
+  const fieldButton = e.target.closest("[data-recognize-field]");
+  if (fieldButton) {
+    reprocessSingleField(fieldButton.dataset.recognizeField, fieldButton).catch(err => {
+      showMessage(
+        err.status === 404
+          ? "Сервер не обновлён. Перезапустите сервер и повторите."
+          : err.message,
+        true,
+      );
+    });
+    return;
+  }
+  const recognizeButton = e.target.closest("[data-reprocess-section]");
+  if (recognizeButton) {
+    reprocessDeal(recognizeButton.dataset.reprocessSection, recognizeButton).catch(err => showMessage(err.message, true));
+    return;
+  }
   const button = e.target.closest("[data-clear-section]");
   if (!button) return;
   clearSection(button.dataset.clearSection).catch(err => showMessage(err.message, true));
@@ -709,6 +1095,7 @@ document.querySelector(".workspace").addEventListener("click", e => {
 form.addEventListener("input", e => {
   const field = e.target;
   if (!field.name) return updateReadiness();
+  if (field.name === "contract_number") state.contractNumberAuto = false;
   if (field.name.endsWith("_phone")) field.value = formatPhone(field.value);
   if (["seller_passport", "buyer_passport"].includes(field.name)) {
     field.value = formatSeriesNumber(field.value);
@@ -716,11 +1103,12 @@ form.addEventListener("input", e => {
   if (field.name === "sts_series_number") field.value = formatStsNumber(field.value);
   if (field.name === "pts_series_number") field.value = formatPtsNumber(field.value);
   if (field.name === "registration_plate") field.value = normalizePlate(field.value);
-  if (field.name === "vin") field.value = normalizeDealField("vin", field.value);
+  if (field.name === "vin" && field.value.toUpperCase() !== "ОТСУТСТВУЕТ") field.value = normalizeDealField("vin", field.value);
   markMissingFields();
   updateReadiness();
 });
 
+installFieldRecognitionButtons();
 newDeal();
 loadArchive().catch(e => showMessage(e.message, true));
 

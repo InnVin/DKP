@@ -14,9 +14,9 @@ from openpyxl.utils import get_column_letter
 
 from .database import OUTPUT_DIR, ROOT
 
-TEMPLATE_PATH = ROOT / "MyFiles" / "BAZA.xls"
-FILL_SCRIPT = ROOT / "tools" / "fill_baza.ps1"
-POWERSHELL_32 = Path(r"C:\Windows\SysWOW64\WindowsPowerShell\v1.0\powershell.exe")
+TEMPLATE_PATH = ROOT / "training_examples" / "Шаблон ДКП.xls"
+FILL_SCRIPT = ROOT / "tools" / "fill_contract_template.ps1"
+POWERSHELL = Path(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe")
 
 
 def _safe_name(value: str) -> str:
@@ -64,7 +64,8 @@ def _write_default_workbook(path: Path, payload: dict[str, Any]) -> None:
         ws.column_dimensions[get_column_letter(index)].width = width
 
     ws.merge_cells("A1:H2")
-    ws["A1"] = "ДОГОВОР КУПЛИ-ПРОДАЖИ АВТОМОБИЛЯ"
+    contract_number = str(payload.get("contract_number", "")).strip()
+    ws["A1"] = f"ДОГОВОР КУПЛИ-ПРОДАЖИ АВТОМОБИЛЯ № {contract_number}" if contract_number else "ДОГОВОР КУПЛИ-ПРОДАЖИ АВТОМОБИЛЯ"
     ws["A1"].font = Font(name="Times New Roman", size=15, bold=True)
     ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
 
@@ -151,8 +152,8 @@ def _write_default_workbook(path: Path, payload: dict[str, Any]) -> None:
 
 
 def _fill_baza_copy(template: Path, path: Path, payload: dict[str, Any]) -> int:
-    if not POWERSHELL_32.exists():
-        raise RuntimeError("Не найден 32-битный Windows PowerShell для работы со старым .xls")
+    if not POWERSHELL.exists():
+        raise RuntimeError("Не найден Windows PowerShell для работы с шаблоном .xls")
     if not FILL_SCRIPT.exists():
         raise RuntimeError("Не найден служебный сценарий заполнения BAZA.xls")
 
@@ -169,7 +170,7 @@ def _fill_baza_copy(template: Path, path: Path, payload: dict[str, Any]) -> int:
     try:
         result = subprocess.run(
             [
-                str(POWERSHELL_32),
+                str(POWERSHELL),
                 "-NoProfile",
                 "-ExecutionPolicy",
                 "Bypass",
@@ -190,8 +191,7 @@ def _fill_baza_copy(template: Path, path: Path, payload: dict[str, Any]) -> int:
         )
         if result.returncode != 0:
             raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "Ошибка заполнения BAZA.xls")
-        record_id = result.stdout.strip().splitlines()[-1]
-        return int(record_id)
+        return int(str(payload.get("contract_number") or 0))
     finally:
         json_path.unlink(missing_ok=True)
 
@@ -200,7 +200,7 @@ def create_contract(deal_id: int, payload: dict[str, Any]) -> tuple[Path, str]:
     if TEMPLATE_PATH.exists():
         target = _output_path(deal_id, payload, ".xls")
         record_id = _fill_baza_copy(TEMPLATE_PATH, target, payload)
-        return target, f"BAZA.xls, запись № {record_id}"
+        return target, f"Шаблон ДКП.xls, договор № {record_id}"
 
     target = _output_path(deal_id, payload, ".xlsx")
     _write_default_workbook(target, payload)

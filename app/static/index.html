@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>АвтоДоговор</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20260727-1">
+  <link rel="stylesheet" href="/static/styles.css?v=20260727-12">
 </head>
 <body>
   <header class="topbar">
@@ -15,8 +15,9 @@
       </div>
       <div class="top-actions">
         <button id="sidebarToggle" class="icon-button" type="button" title="Свернуть архив" aria-label="Свернуть архив"><span></span></button>
+        <button id="topNewDeal" class="button primary" type="button">Создать ДКП</button>
         <button id="saveDeal" class="button primary">Сохранить</button>
-        <button id="makeContract" class="button accent">Создать ДКП</button>
+        <button id="makeContract" class="button accent">Excel</button>
       </div>
     </div>
     <section class="readiness-panel" aria-label="Готовность договора">
@@ -32,6 +33,10 @@
       <div id="readinessChecks" class="readiness-checks"></div>
     </section>
   </header>
+  <div id="recognitionProgress" class="recognition-progress hidden" role="status" aria-live="polite">
+    <span class="recognition-progress-bar"></span>
+    <strong id="recognitionStage">Подготовка документов</strong>
+  </div>
 
   <main class="layout">
     <aside class="sidebar">
@@ -53,12 +58,11 @@
             <span class="eyebrow">Документы</span>
             <h2>Загрузите документы</h2>
           </div>
-          <button id="newDeal" class="button secondary section-new-deal" type="button">Новый ДКП</button>
           <button id="reprocessDeal" class="button section-reprocess" type="button" title="Распознать все документы заново">
             <span class="refresh-icon"></span><span class="reprocess-label">Распознать заново</span>
           </button>
-          <button class="button clear-section" type="button" data-clear-section="documents">Очистить</button>
-          <p>Добавляйте файлы в нужную графу. Yandex OCR запускается для jpg, png и PDF; остальные форматы сохраняются как вложения.</p>
+          <button class="button clear-section icon-only" type="button" data-clear-section="documents" title="Очистить документы" aria-label="Очистить документы"></button>
+          <p>Добавляйте файлы в нужную графу. OpenRouter распознаёт поддерживаемые изображения; остальные форматы сохраняются как вложения.</p>
         </div>
         <div id="uploadGrid" class="upload-grid">
           <label class="upload-tile" data-type="seller_passport">
@@ -95,9 +99,11 @@
           <div class="section-heading">
             <span class="step">2</span>
             <div><h2>Договор</h2><p>Общие данные сделки</p></div>
-            <button class="button clear-section" type="button" data-clear-section="contract">Очистить</button>
+            <button class="button section-reprocess" type="button" data-reprocess-section="contract">Распознать</button>
+            <button class="button clear-section icon-only" type="button" data-clear-section="contract" title="Очистить раздел" aria-label="Очистить раздел"></button>
           </div>
-          <div class="grid three">
+          <div class="grid four contract-grid">
+            <label>№ договора<input name="contract_number" inputmode="numeric"></label>
             <label>Дата договора<input name="contract_date" type="date"></label>
             <label>Место составления<input name="contract_place"></label>
             <label>Стоимость, руб.<input name="price" inputmode="decimal"></label>
@@ -109,7 +115,8 @@
             <div class="section-heading">
               <span class="step">3</span>
               <div><h2>Продавец</h2><p>Данные владельца автомобиля</p></div>
-              <button class="button clear-section" type="button" data-clear-section="seller">Очистить</button>
+              <button class="button section-reprocess" type="button" data-reprocess-section="seller">Распознать</button>
+              <button class="button clear-section icon-only" type="button" data-clear-section="seller" title="Очистить раздел" aria-label="Очистить раздел"></button>
             </div>
             <div class="grid">
               <label class="wide">ФИО<input name="seller_full_name"></label>
@@ -126,7 +133,8 @@
             <div class="section-heading">
               <span class="step">4</span>
               <div><h2>Покупатель</h2><p>Данные нового владельца</p></div>
-              <button class="button clear-section" type="button" data-clear-section="buyer">Очистить</button>
+              <button class="button section-reprocess" type="button" data-reprocess-section="buyer">Распознать</button>
+              <button class="button clear-section icon-only" type="button" data-clear-section="buyer" title="Очистить раздел" aria-label="Очистить раздел"></button>
             </div>
             <div class="grid">
               <label class="wide">ФИО<input name="buyer_full_name"></label>
@@ -144,15 +152,16 @@
           <div class="section-heading">
             <span class="step">5</span>
             <div><h2>Автомобиль</h2><p>Сверьте особенно VIN и номера документов</p></div>
-            <button class="button clear-section" type="button" data-clear-section="vehicle">Очистить</button>
+            <button class="button section-reprocess" type="button" data-reprocess-section="vehicle">Распознать</button>
+            <button class="button clear-section icon-only" type="button" data-clear-section="vehicle" title="Очистить раздел" aria-label="Очистить раздел"></button>
           </div>
           <div class="grid three">
             <label class="wide">Марка и модель<input name="vehicle_make_model"></label>
             <label>Категория ТС<input name="vehicle_type"></label>
             <label>Год выпуска<input name="vehicle_year"></label>
-            <label>VIN<input name="vin" maxlength="17" placeholder="ОТСУТСТВУЕТ"></label>
+            <label>VIN<input name="vin" maxlength="17" value="ОТСУТСТВУЕТ"></label>
             <label>Номер кузова<input name="body_number"></label>
-            <label>Номер шасси<input name="chassis_number"></label>
+            <label>Номер шасси<input name="chassis_number" value="ОТСУТСТВУЕТ"></label>
             <label>Цвет<input name="color"></label>
             <label>Госномер<input name="registration_plate"></label>
             <label>ПТС<input name="pts_series_number"></label>
@@ -164,7 +173,8 @@
           <div class="section-heading">
             <span class="step">!</span>
             <div><h2>Заметки распознавания</h2><p>Это поле хранится в архиве, но никогда не печатается в договоре</p></div>
-            <button class="button clear-section" type="button" data-clear-section="notes">Очистить</button>
+            <button class="button section-reprocess" type="button" data-reprocess-section="notes">Распознать</button>
+            <button class="button clear-section icon-only" type="button" data-clear-section="notes" title="Очистить раздел" aria-label="Очистить раздел"></button>
           </div>
           <div class="notes-grid">
             <label>Продавец<textarea name="seller_notes" rows="6"></textarea></label>
@@ -177,7 +187,7 @@
     </section>
   </main>
 
-  <script src="/static/app.js?v=20260727-1"></script>
+  <script src="/static/app.js?v=20260727-12"></script>
 </body>
 </html>
 

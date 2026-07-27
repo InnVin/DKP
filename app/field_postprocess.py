@@ -107,6 +107,10 @@ def _vin_or_body(value: str) -> tuple[str, str]:
     return "", body if len(body.replace("-", "")) >= 5 else ""
 
 
+def _body_number(value: str) -> str:
+    return re.sub(r"[^A-ZА-Я0-9-]", "", value.upper())
+
+
 def _name(value: str) -> str:
     value = _clean(value)
     value = re.sub(r"\b(?:ЛИЧ|ПОЛ|МУЖ|ЖЕН|866)\b", " ", value, flags=re.IGNORECASE)
@@ -160,7 +164,9 @@ def postprocess_fields(fields: dict[str, Any], document_hint: str = "auto") -> d
             value = vin
             if body and "body_number" not in cleaned:
                 cleaned["body_number"] = body
-        elif key in {"body_number", "chassis_number"}:
+        elif key == "body_number":
+            value = _body_number(value)
+        elif key == "chassis_number":
             value = re.sub(r"[^A-ZА-Я0-9-]", "", value.upper())
         elif key == "color":
             value = value.title()

@@ -37,7 +37,9 @@ FIELD_NAMES = [
     "pts_series_number",
     "sts_series_number",
     "price",
+    "contract_number",
     "contract_date",
+    "contract_place",
 ]
 
 SYSTEM_PROMPT = """
@@ -153,4 +155,3 @@ def recognize_images(paths: list[Path], document_hint: str = "auto") -> dict[str
         "field_meta": field_meta,
         "warnings": parsed.get("warnings", []),
     }
-

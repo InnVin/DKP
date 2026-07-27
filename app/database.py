@@ -144,6 +144,20 @@ def save_deal(payload: dict[str, Any], deal_id: int | None = None) -> int:
         return int(cursor.lastrowid)
 
 
+def next_contract_number() -> int:
+    highest = 0
+    with connection() as conn:
+        rows = conn.execute("SELECT id, payload_json FROM deals").fetchall()
+    for row in rows:
+        try:
+            payload = json.loads(row["payload_json"] or "{}")
+            number = int(str(payload.get("contract_number", "")).strip())
+        except (TypeError, ValueError, json.JSONDecodeError):
+            number = int(row["id"])
+        highest = max(highest, number)
+    return highest + 1
+
+
 def get_deal(deal_id: int, include_deleted: bool = False) -> dict[str, Any] | None:
     with connection() as conn:
         if include_deleted:
@@ -281,6 +295,7 @@ def list_deleted_deals() -> list[dict[str, Any]]:
         item["vehicle_make_model"] = payload.get("vehicle_make_model", item.get("vehicle_make_model", ""))
         item["registration_plate"] = payload.get("registration_plate", "")
         item["vin"] = payload.get("vin", "")
+        item["contract_number"] = payload.get("contract_number", row["id"])
         result.append(item)
     return result
 

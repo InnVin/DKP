@@ -1,18 +1,13 @@
 ﻿from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any
 
 from .field_postprocess import postprocess_fields
-from .gemini_ocr import can_process as gemini_can_process
-from .gemini_ocr import recognize_files as gemini_recognize_files
-from .gemini_ocr import status as gemini_status
 from .openrouter_ocr import can_process as openrouter_can_process
 from .openrouter_ocr import recognize_files as openrouter_recognize_files
 from .openrouter_ocr import status as openrouter_status
-from .yandex_ocr import can_process as yandex_can_process
-from .yandex_ocr import recognize_files as yandex_recognize_files
-from .yandex_ocr import status as yandex_status
 
 REQUIRED_BY_TYPE = {
     "seller_passport": ["seller_full_name", "seller_birth_date", "seller_passport", "seller_passport_issue_date", "seller_passport_issued_by", "seller_address"],
@@ -25,7 +20,64 @@ REQUIRED_BY_TYPE = {
 
 
 def _visible(paths: list[Path]) -> list[Path]:
-    return [path for path in paths if path.exists()]
+    unique: list[Path] = []
+    hashes: set[str] = set()
+    for path in paths:
+        if not path.exists():
+            continue
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if digest in hashes:
+            continue
+        hashes.add(digest)
+        unique.append(path)
+    return unique
+
+
+def _resolve_candidates(
+    candidates_by_field: dict[str, list[dict[str, Any]]],
+    document_hint: str,
+) -> tuple[dict[str, str], dict[str, list[dict[str, Any]]]]:
+    resolved: dict[str, str] = {}
+    conflicts: dict[str, list[dict[str, Any]]] = {}
+    for field_name, candidates in candidates_by_field.items():
+        variants: dict[str, dict[str, Any]] = {}
+        for candidate in candidates:
+            normalized = postprocess_fields(
+                {field_name: candidate.get("value", "")},
+                document_hint,
+            ).get(field_name, "")
+            if not normalized:
+                continue
+            variant = variants.setdefault(normalized, {
+                "value": normalized,
+                "pages": set(),
+                "confidence": 0.0,
+            })
+            page = candidate.get("page")
+            if page is not None:
+                variant["pages"].add(str(page))
+            variant["confidence"] = max(
+                variant["confidence"],
+                float(candidate.get("confidence", 0) or 0),
+            )
+        options = [
+            {
+                "value": item["value"],
+                "support": max(1, len(item["pages"])),
+                "confidence": round(item["confidence"], 2),
+            }
+            for item in variants.values()
+        ]
+        options.sort(key=lambda item: (item["support"], item["confidence"]), reverse=True)
+        if not options:
+            continue
+        if len(options) == 1:
+            resolved[field_name] = options[0]["value"]
+        elif options[0]["support"] >= 2 and options[0]["support"] > options[1]["support"]:
+            resolved[field_name] = options[0]["value"]
+        else:
+            conflicts[field_name] = options
+    return resolved, conflicts
 
 
 def _notes(document_hint: str, processed: int, warnings: list[str], missing: list[str]) -> list[str]:
@@ -36,75 +88,46 @@ def _notes(document_hint: str, processed: int, warnings: list[str], missing: lis
     return notes
 
 
-def recognize_files(paths: list[Path], document_hint: str = "auto") -> dict[str, Any]:
+def recognize_files(
+    paths: list[Path],
+    document_hint: str = "auto",
+    target_fields: list[str] | None = None,
+) -> dict[str, Any]:
     paths = _visible(paths)
     if not paths:
         return {"document_type": document_hint, "fields": {}, "field_meta": {}, "text": "", "warnings": ["Нет файлов для OCR"], "engine": "none"}
 
-    yandex = yandex_status()
-    gemini = gemini_status()
     openrouter = openrouter_status()
-    if not openrouter.get("configured") and not gemini.get("configured"):
-        raise RuntimeError("OpenRouter или Gemini API key не настроен. Для точного распознавания добавьте ключ в config/openrouter_api_key.txt или config/gemini_api_key.txt.")
-
-    yandex_text = ""
-    warnings: list[str] = []
-    if yandex.get("configured"):
-        yandex_paths = [path for path in paths if yandex_can_process(path)]
-        if yandex_paths:
-            try:
-                yandex_result = yandex_recognize_files(yandex_paths, document_hint)
-                yandex_text = str(yandex_result.get("text", ""))
-                warnings.extend(yandex_result.get("warnings", []))
-            except RuntimeError as exc:
-                warnings.append(f"Yandex OCR не сработал, Gemini использует изображения напрямую: {exc}")
-        else:
-            warnings.append(f"{document_hint}: нет файлов подходящих для Yandex OCR.")
-    else:
-        warnings.append("Yandex OCR не настроен, Gemini использует изображения напрямую.")
+    if not openrouter.get("configured"):
+        raise RuntimeError("OpenRouter API key не настроен.")
 
     openrouter_paths = [path for path in paths if openrouter_can_process(path)]
-    if openrouter.get("configured") and (openrouter_paths or yandex_text.strip()):
-        try:
-            openrouter_result = openrouter_recognize_files(openrouter_paths, document_hint, ocr_text=yandex_text)
-            fields = postprocess_fields(openrouter_result.get("fields", {}), document_hint)
-            meta = {key: value for key, value in openrouter_result.get("field_meta", {}).items() if key in fields}
-            required = REQUIRED_BY_TYPE.get(document_hint, [])
-            missing = [name for name in required if not fields.get(name)]
-            all_warnings = [*warnings, *openrouter_result.get("warnings", [])]
-            if missing:
-                all_warnings.append(f"{document_hint}: не заполнены поля: {', '.join(missing)}")
-            return {
-                "document_type": openrouter_result.get("document_type", document_hint),
-                "fields": fields,
-                "field_meta": meta,
-                "text": yandex_text,
-                "warnings": all_warnings,
-                "engine": "yandex_openrouter" if yandex_text else "openrouter",
-                "processed": len(openrouter_paths),
-            }
-        except RuntimeError as exc:
-            warnings.append(f"OpenRouter OCR не сработал, пробую Gemini: {exc}")
+    if not openrouter_paths:
+        return {"document_type": document_hint, "fields": {}, "field_meta": {}, "text": "", "warnings": ["Нет файлов подходящих для OpenRouter OCR"], "engine": "none"}
 
-    gemini_paths = [path for path in paths if gemini_can_process(path)]
-    if not gemini.get("configured") or not gemini_paths:
-        return {"document_type": document_hint, "fields": {}, "field_meta": {}, "text": yandex_text, "warnings": [*warnings, "Нет файлов подходящих для OpenRouter/Gemini OCR"], "engine": "yandex_text_only"}
-
-    gemini_result = gemini_recognize_files(gemini_paths, document_hint, ocr_text=yandex_text)
-    fields = postprocess_fields(gemini_result.get("fields", {}), document_hint)
-    meta = {key: value for key, value in gemini_result.get("field_meta", {}).items() if key in fields}
-    required = REQUIRED_BY_TYPE.get(document_hint, [])
+    result = openrouter_recognize_files(openrouter_paths, document_hint, ocr_text="", target_fields=target_fields)
+    fields = postprocess_fields(result.get("fields", {}), document_hint)
+    candidate_fields, conflicts = _resolve_candidates(
+        result.get("field_candidates", {}),
+        document_hint,
+    )
+    fields.update(candidate_fields)
+    for field_name in conflicts:
+        fields.pop(field_name, None)
+    meta = {key: value for key, value in result.get("field_meta", {}).items() if key in fields}
+    required = target_fields or REQUIRED_BY_TYPE.get(document_hint, [])
     missing = [name for name in required if not fields.get(name)]
-    all_warnings = [*warnings, *gemini_result.get("warnings", [])]
+    warnings = list(result.get("warnings", []))
     if missing:
-        all_warnings.append(f"{document_hint}: не заполнены поля: {', '.join(missing)}")
+        warnings.append(f"{document_hint}: не заполнены поля: {', '.join(missing)}")
     return {
-        "document_type": gemini_result.get("document_type", document_hint),
+        "document_type": result.get("document_type", document_hint),
         "fields": fields,
         "field_meta": meta,
-        "text": yandex_text,
-        "warnings": all_warnings,
-        "engine": "yandex_gemini" if yandex_text else "gemini",
-        "processed": len(gemini_paths),
+        "conflicts": conflicts,
+        "text": "",
+        "warnings": warnings,
+        "engine": "openrouter",
+        "processed": len(openrouter_paths),
     }
 
