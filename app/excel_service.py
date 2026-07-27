@@ -121,7 +121,7 @@ def _write_default_workbook(path: Path, payload: dict[str, Any]) -> None:
             ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=2)
             ws.merge_cells(start_row=row, start_column=3, end_row=row, end_column=8)
             ws.cell(row, 1, label).font = Font(name="Times New Roman", bold=True)
-            ws.cell(row, 3, str(payload.get(key, ""))).font = Font(name="Times New Roman")
+            ws.cell(row, 3, str(payload.get(key, ""))).font = Font(name="Times New Roman", size=10)
             for col in range(1, 9):
                 ws.cell(row, col).border = Border(bottom=thin)
             row += 1
@@ -143,8 +143,12 @@ def _write_default_workbook(path: Path, payload: dict[str, Any]) -> None:
     row += 4
     ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=4)
     ws.merge_cells(start_row=row, start_column=5, end_row=row, end_column=8)
-    ws.cell(row, 1, "Продавец: _______________________")
-    ws.cell(row, 5, "Покупатель: _____________________")
+    seller_name = str(payload.get("seller_full_name", "")).strip()
+    buyer_name = str(payload.get("buyer_full_name", "")).strip()
+    ws.cell(row, 1, f"Продавец: __________ / {seller_name}")
+    ws.cell(row, 5, f"Покупатель: ________ / {buyer_name}")
+    ws.cell(row, 1).font = Font(name="Times New Roman", size=10)
+    ws.cell(row, 5).font = Font(name="Times New Roman", size=10)
     ws.sheet_properties.pageSetUpPr.fitToPage = True
     ws.page_setup.fitToWidth = 1
     ws.page_setup.fitToHeight = 1
