@@ -1,5 +1,6 @@
 ﻿const state = { dealId: null, documents: [], highlightMissing: false, deleteConfirmId: null, trashOpen: false };
 const form = document.querySelector("#dealForm");
+state.trashDeleteConfirmId = null;
 const message = document.querySelector("#message");
 const documentLabels = {
   seller_passport: "Паспорт продавца",
@@ -41,11 +42,21 @@ const uploadHintByType = {
   other: "Любые вложения",
 };
 
-function showMessage(text, error = false) {
-  message.textContent = text;
+function showMessage(text, error = false, action = null, duration = 5000) {
+  message.replaceChildren();
+  const label = document.createElement("span");
+  label.textContent = text;
+  message.appendChild(label);
+  if (action) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = action.label;
+    button.addEventListener("click", action.handler, { once: true });
+    message.appendChild(button);
+  }
   message.className = `message${error ? " error" : ""}`;
   clearTimeout(showMessage.timer);
-  showMessage.timer = setTimeout(() => message.classList.add("hidden"), 5000);
+  showMessage.timer = setTimeout(() => message.classList.add("hidden"), duration);
 }
 
 function formData() {
@@ -115,17 +126,17 @@ async function saveDeal(silent = false) {
 async function loadArchive(query = "") {
   const rows = await api(`/api/deals?q=${encodeURIComponent(query)}`);
   const list = document.querySelector("#archiveList");
-  list.innerHTML = rows.map((row, index) => `
+  list.innerHTML = rows.map(row => `
     <div class="archive-item ${row.id === state.dealId ? "active" : ""}" data-id="${row.id}">
       <div class="archive-head">
-        <span class="archive-number">${index + 1}</span>
+        <span class="archive-number">ДКП №${row.id}</span>
         <strong>${escapeHtml(row.buyer_full_name || row.seller_full_name || "Без имени")}</strong>
         ${archiveBadge(row)}
       </div>
       ${state.deleteConfirmId === row.id ? `
         <div class="archive-confirm">
-          <button class="confirm-delete" type="button" title="Подтвердить удаление" data-confirm-delete-deal="${row.id}">✓</button>
           <button class="cancel-delete" type="button" title="Отмена" data-cancel-delete>×</button>
+          <button class="confirm-delete" type="button" title="Подтвердить удаление" data-confirm-delete-deal="${row.id}">✓</button>
         </div>
       ` : `<button class="icon-delete archive-delete" type="button" title="Удалить сделку" data-delete-deal="${row.id}">×</button>`}
       <span>${escapeHtml(row.vehicle_make_model || "Автомобиль не указан")}</span>
@@ -145,7 +156,7 @@ async function openDeal(id) {
 function newDeal() {
   state.dealId = null;
   state.documents = [];
-  setForm({ contract_date: todayLocal(), contract_place: "Якутск", vehicle_type: "B/M1" });
+  setForm({ contract_date: todayLocal(), contract_place: "Якутск" });
   document.querySelector("#dealBadge").textContent = "Новая";
   document.querySelectorAll(".archive-item").forEach(x => x.classList.remove("active"));
 }
@@ -262,7 +273,9 @@ function renderDocuments() {
         <div class="document-items">
           ${docs.map(doc => `
             <div class="document-chip">
-              <a href="/api/documents/${doc.id}" target="_blank">${escapeHtml(doc.original_name)}</a>
+              ${isUploadPending(doc)
+                ? `<span class="pending-document">${escapeHtml(doc.original_name)}</span>`
+                : `<a href="/api/documents/${doc.id}" target="_blank">${escapeHtml(doc.original_name)}</a>`}
               <small>${isUploadPending(doc) ? `${doc.progress || 0}%` : formatFileSize(doc.file_size)}</small>
               ${isUploadPending(doc) ? `<div class="upload-progress"><span style="width:${doc.progress || 0}%"></span></div>` : ""}
               ${isUploadPending(doc) ? "" : `<button class="icon-delete document-delete" type="button" title="Удалить документ" data-delete-document="${doc.id}">×</button>`}
@@ -292,7 +305,15 @@ async function deleteDeal(id) {
   if (Number(state.dealId) === Number(id)) newDeal();
   state.deleteConfirmId = null;
   await loadArchive(document.querySelector("#archiveSearch").value);
-  showMessage("Сделка перемещена в корзину");
+  showMessage(
+    "ДКП перемещён в корзину",
+    false,
+    {
+      label: "Отменить",
+      handler: () => restoreDeal(id, true).catch(err => showMessage(err.message, true)),
+    },
+    3000,
+  );
 }
 
 async function loadTrash() {
@@ -312,20 +333,34 @@ async function loadTrash() {
     <div class="trash-list ${state.trashOpen ? "" : "hidden"}">
       ${rows.map(row => `
         <div class="trash-item">
+          <span class="trash-deal-number">ДКП №${row.id}</span>
           <strong>${escapeHtml(row.seller_full_name || "Без продавца")}</strong>
           <span>${escapeHtml(row.vehicle_make_model || "Автомобиль не указан")}</span>
           <small>${formatDeletedAt(row.deleted_at)}</small>
-          <button class="button restore-button" type="button" data-restore-deal="${row.id}">Восстановить</button>
+          <div class="trash-actions">
+            <button class="button restore-button" type="button" data-restore-deal="${row.id}">Восстановить</button>
+            ${state.trashDeleteConfirmId === row.id ? `
+              <button class="trash-cancel-delete" type="button" title="Отмена" data-cancel-trash-delete>×</button>
+              <button class="trash-confirm-delete" type="button" title="Удалить навсегда" data-confirm-trash-delete="${row.id}">✓</button>
+            ` : `<button class="trash-delete" type="button" title="Удалить навсегда" data-delete-trash="${row.id}">×</button>`}
+          </div>
         </div>
       `).join("") || `<p>Корзина пуста</p>`}
     </div>
   `;
 }
 
-async function restoreDeal(id) {
+async function restoreDeal(id, fromUndo = false) {
   await api(`/api/deals/${id}/restore`, { method: "POST" });
   await loadArchive(document.querySelector("#archiveSearch").value);
-  showMessage("Сделка восстановлена");
+  showMessage(fromUndo ? "Удаление отменено" : "ДКП восстановлен");
+}
+
+async function permanentlyDeleteDeal(id) {
+  await api(`/api/deals/${id}/permanent`, { method: "DELETE" });
+  state.trashDeleteConfirmId = null;
+  await loadTrash();
+  showMessage("ДКП удалён навсегда");
 }
 
 async function makeContract() {
@@ -337,7 +372,7 @@ async function makeContract() {
   try {
     await saveDeal(true);
     const result = await api(`/api/deals/${state.dealId}/contract`, { method: "POST" });
-    showMessage(`Excel создан: ${result.template}`);
+    showMessage("ДКП создан. Копия сохранена в data/contracts");
     window.location.href = result.download_url;
   } finally {
     button.disabled = false;
@@ -352,9 +387,10 @@ async function reprocessDeal() {
   }
   const button = document.querySelector("#reprocessDeal");
   button.disabled = true;
-  const originalHtml = button.innerHTML;
   button.classList.add("loading");
   button.setAttribute("aria-label", "Распознаю документы");
+  const label = button.querySelector(".reprocess-label");
+  if (label) label.textContent = "Распознаю...";
   try {
     const result = await api(`/api/deals/${state.dealId}/reprocess`, { method: "POST" });
     for (const [key, value] of Object.entries(result.fields || {})) {
@@ -371,7 +407,7 @@ async function reprocessDeal() {
   } finally {
     button.disabled = false;
     button.classList.remove("loading");
-    button.innerHTML = originalHtml;
+    if (label) label.textContent = "Распознать заново";
     button.setAttribute("aria-label", "Распознать документы заново");
   }
 }
@@ -643,6 +679,22 @@ document.querySelector("#trashPanel").addEventListener("click", e => {
   const restoreButton = e.target.closest("[data-restore-deal]");
   if (restoreButton) {
     restoreDeal(Number(restoreButton.dataset.restoreDeal)).catch(err => showMessage(err.message, true));
+    return;
+  }
+  const deleteButton = e.target.closest("[data-delete-trash]");
+  if (deleteButton) {
+    state.trashDeleteConfirmId = Number(deleteButton.dataset.deleteTrash);
+    loadTrash().catch(err => showMessage(err.message, true));
+    return;
+  }
+  if (e.target.closest("[data-cancel-trash-delete]")) {
+    state.trashDeleteConfirmId = null;
+    loadTrash().catch(err => showMessage(err.message, true));
+    return;
+  }
+  const confirmButton = e.target.closest("[data-confirm-trash-delete]");
+  if (confirmButton) {
+    permanentlyDeleteDeal(Number(confirmButton.dataset.confirmTrashDelete)).catch(err => showMessage(err.message, true));
   }
 });
 document.querySelector("#readinessChecks").addEventListener("click", e => {

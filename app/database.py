@@ -195,6 +195,31 @@ def restore_deal(deal_id: int) -> bool:
     return cursor.rowcount > 0
 
 
+def permanently_delete_deal(deal_id: int) -> bool:
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT id FROM deals WHERE id=? AND deleted_at<>''",
+            (deal_id,),
+        ).fetchone()
+        if not row:
+            return False
+        paths = [
+            Path(item["stored_path"])
+            for item in conn.execute(
+                "SELECT stored_path FROM documents WHERE deal_id=?",
+                (deal_id,),
+            ).fetchall()
+        ]
+        conn.execute("DELETE FROM documents WHERE deal_id=?", (deal_id,))
+        conn.execute("DELETE FROM deals WHERE id=?", (deal_id,))
+    for path in paths:
+        _delete_upload_file(path)
+    folder = UPLOAD_DIR / str(deal_id)
+    if folder.exists():
+        shutil.rmtree(folder, ignore_errors=True)
+    return True
+
+
 def search_deals(query: str = "") -> list[dict[str, Any]]:
     query = query.strip()
     with connection() as conn:

@@ -95,7 +95,7 @@ def _write_default_workbook(path: Path, payload: dict[str, Any]) -> None:
         ]),
         ("АВТОМОБИЛЬ", [
             ("Марка, модель", "vehicle_make_model"),
-            ("Тип ТС", "vehicle_type"),
+            ("Категория ТС", "vehicle_type"),
             ("Год выпуска", "vehicle_year"),
             ("VIN", "vin"),
             ("Кузов", "body_number"),

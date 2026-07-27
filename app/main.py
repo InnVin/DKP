@@ -260,6 +260,13 @@ def restore_deal(deal_id: int) -> dict[str, Any]:
     return {"restored": True}
 
 
+@app.delete("/api/deals/{deal_id}/permanent")
+def permanently_delete_deal(deal_id: int) -> dict[str, Any]:
+    if not database.permanently_delete_deal(deal_id):
+        raise HTTPException(404, "ДКП не найден в корзине")
+    return {"deleted": True, "permanent": True}
+
+
 @app.get("/api/documents/{document_id}")
 def download_document(document_id: int) -> FileResponse:
     path = database.get_document_path(document_id)

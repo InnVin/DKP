@@ -207,6 +207,10 @@ def extract_fields_from_text(text: str, source: str = "ocr_text", document_hint:
         if sts:
             add("sts_series_number", sts.group(1), 0.58, sts.group(0))
 
+        category = re.search(r"(?:КАТЕГОРИЯ\s+ТС|КАТЕГОРИЯ)\s*[:№]?\s*([A-EА-Е](?:\s*/\s*[A-ZА-Я0-9]+)?)", upper_text)
+        if category:
+            add("vehicle_type", category.group(1).replace(" ", ""), 0.72, category.group(0))
+
     fio_line = next(
         (
             line

@@ -4,20 +4,33 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>АвтоДоговор</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20260724-3">
+  <link rel="stylesheet" href="/static/styles.css?v=20260727-1">
 </head>
 <body>
   <header class="topbar">
-    <div>
-      <span class="eyebrow">Локально на вашем компьютере</span>
-      <h1>АвтоДоговор</h1>
+    <div class="topbar-main">
+      <div>
+        <span class="eyebrow">Локально на вашем компьютере</span>
+        <h1>АвтоДоговор</h1>
+      </div>
+      <div class="top-actions">
+        <button id="sidebarToggle" class="icon-button" type="button" title="Свернуть архив" aria-label="Свернуть архив"><span></span></button>
+        <button id="saveDeal" class="button primary">Сохранить</button>
+        <button id="makeContract" class="button accent">Создать ДКП</button>
+      </div>
     </div>
-    <div class="top-actions">
-      <button id="sidebarToggle" class="icon-button" type="button" title="Свернуть архив" aria-label="Свернуть архив"><span></span></button>
-      <button id="reprocessDeal" class="icon-button recognize-top" type="button" title="Распознать документы заново" aria-label="Распознать документы заново"><span class="refresh-icon"></span></button>
-      <button id="saveDeal" class="button primary">Сохранить</button>
-      <button id="makeContract" class="button accent">Создать Excel</button>
-    </div>
+    <section class="readiness-panel" aria-label="Готовность договора">
+      <div class="readiness-summary">
+        <span class="eyebrow">Контроль заполнения</span>
+        <h2 id="readinessTitle">Договор пока не заполнен</h2>
+        <p id="readinessHint">Загрузите документы или заполните поля вручную.</p>
+      </div>
+      <div class="readiness-score">
+        <strong id="readinessPercent">0%</strong>
+        <span>готово</span>
+      </div>
+      <div id="readinessChecks" class="readiness-checks"></div>
+    </section>
   </header>
 
   <main class="layout">
@@ -27,26 +40,12 @@
         <span id="dealBadge" class="badge">Новая</span>
       </div>
       <input id="archiveSearch" class="search" placeholder="VIN, кузов, СТС, госномер, продавец, покупатель">
+      <div id="message" class="message hidden"></div>
       <div id="archiveList" class="archive-list"></div>
       <div id="trashPanel" class="trash-panel"></div>
     </aside>
 
     <section class="workspace">
-      <div id="message" class="message hidden"></div>
-
-      <section class="readiness-panel" aria-label="Готовность договора">
-        <div class="readiness-summary">
-          <span class="eyebrow">Контроль заполнения</span>
-          <h2 id="readinessTitle">Договор пока не заполнен</h2>
-          <p id="readinessHint">Загрузите документы или заполните поля вручную. Подсказка покажет, чего не хватает для Excel.</p>
-        </div>
-        <div class="readiness-score">
-          <strong id="readinessPercent">0%</strong>
-          <span>готово</span>
-        </div>
-        <div id="readinessChecks" class="readiness-checks"></div>
-      </section>
-
       <section id="section-documents" class="upload-panel page-section">
         <div class="upload-heading">
           <span class="step">1</span>
@@ -55,6 +54,9 @@
             <h2>Загрузите документы</h2>
           </div>
           <button id="newDeal" class="button secondary section-new-deal" type="button">Новый ДКП</button>
+          <button id="reprocessDeal" class="button section-reprocess" type="button" title="Распознать все документы заново">
+            <span class="refresh-icon"></span><span class="reprocess-label">Распознать заново</span>
+          </button>
           <button class="button clear-section" type="button" data-clear-section="documents">Очистить</button>
           <p>Добавляйте файлы в нужную графу. Yandex OCR запускается для jpg, png и PDF; остальные форматы сохраняются как вложения.</p>
         </div>
@@ -146,7 +148,7 @@
           </div>
           <div class="grid three">
             <label class="wide">Марка и модель<input name="vehicle_make_model"></label>
-            <label>Тип ТС<input name="vehicle_type"></label>
+            <label>Категория ТС<input name="vehicle_type"></label>
             <label>Год выпуска<input name="vehicle_year"></label>
             <label>VIN<input name="vin" maxlength="17" placeholder="ОТСУТСТВУЕТ"></label>
             <label>Номер кузова<input name="body_number"></label>
@@ -175,7 +177,7 @@
     </section>
   </main>
 
-  <script src="/static/app.js?v=20260724-3"></script>
+  <script src="/static/app.js?v=20260727-1"></script>
 </body>
 </html>
 
