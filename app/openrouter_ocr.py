@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import mimetypes
+import socket
 import urllib.error
 import urllib.request
 from io import BytesIO
@@ -34,10 +35,25 @@ def model() -> str:
     return get_config("OPENROUTER_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
 
 
+def proxy_url() -> str:
+    configured = get_config("OPENROUTER_PROXY").strip()
+    if configured:
+        return configured
+    # HAPP/Xray обычно поднимает локальный HTTP-прокси на одном из этих портов.
+    for port in (10809, 10808):
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.15):
+                return f"http://127.0.0.1:{port}"
+        except OSError:
+            continue
+    return ""
+
+
 def status() -> dict[str, Any]:
     return {
         "configured": bool(api_key()),
         "model": model(),
+        "proxy_configured": bool(proxy_url()),
         "key_file": str(KEY_FILE),
     }
 
@@ -127,8 +143,12 @@ def recognize_files(
         },
         method="POST",
     )
+    proxy = proxy_url()
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({"http": proxy, "https": proxy})
+    ) if proxy else urllib.request.build_opener()
     try:
-        with urllib.request.urlopen(request, timeout=180) as response:
+        with opener.open(request, timeout=180) as response:
             response_payload = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")

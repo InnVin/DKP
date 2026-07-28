@@ -692,8 +692,8 @@ textarea { resize: vertical; min-height: 42px; }
 .grid label .has-field-recognize { padding-right: 42px; }
 .field-recognize {
   position: absolute;
-  top: 26px;
-  right: 6px;
+  top: 28px;
+  right: 7px;
   width: 29px;
   height: 29px;
   padding: 0;
@@ -705,6 +705,23 @@ textarea { resize: vertical; min-height: 42px; }
   background: #eff6ff;
   cursor: pointer;
   font: 800 17px/1 "Segoe UI", Arial, sans-serif;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(-2px) scale(.92);
+  transition:
+    opacity .14s ease,
+    visibility .14s ease,
+    transform .14s ease,
+    border-color .14s ease,
+    background-color .14s ease;
+}
+.grid label:hover .field-recognize,
+.grid label:focus-within .field-recognize {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
 }
 .field-recognize:hover { border-color: var(--accent); background: #dbeafe; }
 .field-recognize:disabled { cursor: wait; opacity: .65; }
