@@ -17,6 +17,7 @@ import { AppButton } from "@/components/app-button";
 import { ContractPreview } from "@/components/contract-preview";
 import { FieldInput } from "@/components/field-input";
 import { ScreenLoading } from "@/components/screen-state";
+import { SwipeView } from "@/components/swipe-view";
 import { generateContractFiles, printPdf, shareGeneratedFile } from "@/lib/contract-files";
 import {
   getDeal,
@@ -132,6 +133,12 @@ export function DealEditor({ dealId }: { dealId: number }) {
   const [step, setStep] = useState<Step>("documents");
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
+  const [noticeKind, setNoticeKind] = useState<"info" | "success" | "error">("info");
+
+  const showNotice = (message: string, kind: "info" | "success" | "error" = "info") => {
+    setNotice(message);
+    setNoticeKind(kind);
+  };
 
   const reloadDocuments = async () => setDocuments(await listDocuments(dealId));
   const reloadGenerated = async () => setGenerated(await listGeneratedFiles(dealId));
@@ -250,7 +257,7 @@ export function DealEditor({ dealId }: { dealId: number }) {
       else await pickDocumentPhotos(dealId, type);
       await reloadDocuments();
     } catch (error) {
-      Alert.alert("Не удалось добавить фото", messageOf(error));
+      showNotice(messageOf(error), "error");
     } finally {
       setBusy("");
     }
@@ -279,10 +286,10 @@ export function DealEditor({ dealId }: { dealId: number }) {
       return;
     }
     setBusy(`ocr-${type}`);
-    setNotice("Подготовка документов…");
+    showNotice("Подготовка документов…");
     try {
       await Promise.all(docs.map((document) => updateDocumentStatus(document.id, "processing")));
-      setNotice("Распознавание через OpenRouter…");
+      showNotice("Распознавание через OpenRouter…");
       const result = await recognizeDocuments(docs, type, targetFields);
       const nextData = { ...data, ...result.fields };
       const nextMeta = { ...record.fieldMeta, ...result.fieldMeta };
@@ -291,14 +298,15 @@ export function DealEditor({ dealId }: { dealId: number }) {
       setRecord({ ...record, data: nextData, fieldMeta: nextMeta, conflicts: nextConflicts });
       await saveDeal(dealId, nextData, nextMeta, nextConflicts);
       await Promise.all(docs.map((document) => updateDocumentStatus(document.id, "done")));
-      setNotice(
+      showNotice(
         Object.keys(result.conflicts).length
           ? "Распознавание завершено. Проверьте спорные значения."
           : "Распознавание завершено. Проверьте заполненные поля.",
+        Object.keys(result.conflicts).length ? "error" : "success",
       );
     } catch (error) {
       await Promise.all(docs.map((document) => updateDocumentStatus(document.id, "queued")));
-      setNotice(messageOf(error));
+      showNotice(messageOf(error), "error");
     } finally {
       await reloadDocuments();
       setBusy("");
@@ -307,7 +315,7 @@ export function DealEditor({ dealId }: { dealId: number }) {
 
   const generate = async () => {
     setBusy("generate");
-    setNotice("Формируем Excel, PDF и JPG…");
+    showNotice("Формируем Excel, PDF и JPG…");
     try {
       await saveDeal(dealId, data, record.fieldMeta, record.conflicts);
       const jpg = previewRef.current
@@ -321,14 +329,14 @@ export function DealEditor({ dealId }: { dealId: number }) {
         : undefined;
       await generateContractFiles(dealId, data, jpg);
       await reloadGenerated();
-      setNotice("Файлы сохранены на телефоне.");
+      showNotice("Файлы сохранены на телефоне.", "success");
       let uploadedToDisk = false;
       try {
         const sync = await syncDealFiles(dealId, data);
         uploadedToDisk = !sync.skipped && sync.uploaded > 0;
-        if (uploadedToDisk) setNotice(`Готово. На Яндекс Диск загружено файлов: ${sync.uploaded}.`);
+        if (uploadedToDisk) showNotice(`Готово. На Яндекс Диск загружено файлов: ${sync.uploaded}.`, "success");
       } catch (error) {
-        setNotice(`${messageOf(error)} Файлы сохранены на телефоне.`);
+        showNotice(`${messageOf(error)} Файлы сохранены на телефоне.`, "error");
       }
       if (uploadedToDisk && (await secureSettings.getDeletePhotos())) {
         for (const document of documents) {
@@ -339,7 +347,7 @@ export function DealEditor({ dealId }: { dealId: number }) {
       }
     } catch (error) {
       Alert.alert("Не удалось создать договор", messageOf(error));
-      setNotice(messageOf(error));
+      showNotice(messageOf(error), "error");
     } finally {
       setBusy("");
     }
@@ -350,11 +358,12 @@ export function DealEditor({ dealId }: { dealId: number }) {
     try {
       const result = await syncDealFiles(dealId, data);
       await reloadGenerated();
-      setNotice(
+      showNotice(
         result.skipped ? "Подключите Яндекс Диск или проверьте интернет." : "Файлы загружены на Яндекс Диск.",
+        result.skipped ? "error" : "success",
       );
     } catch (error) {
-      setNotice(messageOf(error));
+      showNotice(messageOf(error), "error");
     } finally {
       setBusy("");
     }
@@ -381,10 +390,7 @@ export function DealEditor({ dealId }: { dealId: number }) {
   const renderDocuments = () => (
     <View style={{ gap: 16 }}>
       <View style={{ gap: 6 }}>
-        <Text style={{ color: colors.text, fontSize: 23, fontWeight: "800" }}>Добавьте документы</Text>
-        <Text selectable style={{ color: colors.muted, fontSize: 14, lineHeight: 20 }}>
-          Снимайте без бликов, держите документ ровно и проверяйте, что все края попали в кадр.
-        </Text>
+        <Text style={{ color: colors.text, fontSize: 23, fontWeight: "800" }}>Загрузите документы</Text>
       </View>
       {documentTypes.map((type) => {
         const docs = groupedDocuments[type];
@@ -652,10 +658,16 @@ export function DealEditor({ dealId }: { dealId: number }) {
             : renderReview();
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-      style={{ flex: 1, backgroundColor: colors.background }}
+    <SwipeView
+      onSwipeLeft={() =>
+        stepIndex < steps.length - 1 ? void nextStep(1) : router.navigate("/settings")
+      }
+      onSwipeRight={() => (stepIndex > 0 ? void nextStep(-1) : router.navigate("/archive"))}
     >
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={{ flex: 1, backgroundColor: colors.background }}
+      >
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         keyboardShouldPersistTaps="handled"
@@ -702,12 +714,34 @@ export function DealEditor({ dealId }: { dealId: number }) {
               padding: 13,
               borderRadius: 13,
               borderCurve: "continuous",
-              backgroundColor: colors.surfaceVariant,
+              borderWidth: noticeKind === "error" ? 1 : 0,
+              borderColor: noticeKind === "error" ? colors.error : "transparent",
+              backgroundColor:
+                noticeKind === "error"
+                  ? `${colors.error}18`
+                  : noticeKind === "success"
+                    ? colors.primaryContainer
+                    : colors.surfaceVariant,
             }}
           >
-            <Text selectable style={{ color: colors.text, lineHeight: 20 }}>
+            <Text
+              selectable
+              style={{
+                color: noticeKind === "error" ? colors.error : colors.text,
+                lineHeight: 20,
+                fontWeight: noticeKind === "error" ? "700" : "400",
+              }}
+            >
               {notice}
             </Text>
+            {noticeKind === "error" && notice.toLocaleLowerCase("ru").includes("openrouter") ? (
+              <AppButton
+                title="Открыть настройки"
+                variant="danger"
+                onPress={() => router.navigate("/settings")}
+                style={{ marginTop: 10 }}
+              />
+            ) : null}
           </View>
         ) : null}
 
@@ -731,6 +765,7 @@ export function DealEditor({ dealId }: { dealId: number }) {
       <View pointerEvents="none" style={{ position: "absolute", left: -1600, top: 0 }}>
         <ContractPreview ref={previewRef} data={data} />
       </View>
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+    </SwipeView>
   );
 }

@@ -3,6 +3,7 @@ import { useCallback, useState } from "react";
 import { Alert, FlatList, Pressable, Text, TextInput, View } from "react-native";
 
 import { AppButton } from "@/components/app-button";
+import { SwipeView } from "@/components/swipe-view";
 import { EmptyState } from "@/components/screen-state";
 import {
   createDeal,
@@ -48,7 +49,7 @@ export default function ArchiveScreen() {
 
   const create = async () => {
     const id = await createDeal();
-    router.push(`/deal/${id}`);
+    router.push(`/new/deal/${id}`);
   };
 
   const erase = async (id: number, removeFromDisk: boolean) => {
@@ -84,7 +85,7 @@ export default function ArchiveScreen() {
   };
 
   return (
-    <>
+    <SwipeView onSwipeLeft={() => router.navigate("/new")}>
       <Stack.Title>Архив ДКП</Stack.Title>
       <FlatList
         contentInsetAdjustmentBehavior="automatic"
@@ -221,12 +222,12 @@ export default function ArchiveScreen() {
           return trash ? (
             card
           ) : (
-            <Link href={`/deal/${item.id}`} asChild>
+            <Link href={`/new/deal/${item.id}`} asChild>
               {card}
             </Link>
           );
         }}
       />
-    </>
+    </SwipeView>
   );
 }

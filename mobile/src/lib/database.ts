@@ -302,6 +302,27 @@ export async function listGeneratedFiles(dealId: number): Promise<GeneratedFile[
   }));
 }
 
+export async function listAllGeneratedFiles(): Promise<GeneratedFile[]> {
+  const db = await database();
+  const rows = await db.getAllAsync<GeneratedRow>(
+    `SELECT generated_files.*
+     FROM generated_files
+     INNER JOIN deals ON deals.id = generated_files.deal_id
+     WHERE deals.deleted_at IS NULL
+     ORDER BY generated_files.created_at DESC`,
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    dealId: row.deal_id,
+    kind: row.kind,
+    localUri: row.local_uri,
+    name: row.name,
+    syncStatus: row.sync_status,
+    remotePath: row.remote_path,
+    createdAt: row.created_at,
+  }));
+}
+
 export async function setGeneratedSyncStatus(id: number, status: SyncStatus, remotePath = "") {
   const db = await database();
   await db.runAsync(

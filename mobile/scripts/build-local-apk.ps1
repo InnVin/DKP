@@ -115,7 +115,9 @@ if (-not (Test-Path -LiteralPath $BuiltApk)) {
     throw "Gradle finished without producing app-release.apk."
 }
 
-$FinalApk = Join-Path $OutputRoot "AutoDogovor-1.0.0.apk"
+$AppConfig = Get-Content -LiteralPath (Join-Path $SourceRoot "app.json") -Raw | ConvertFrom-Json
+$AppVersion = $AppConfig.expo.version
+$FinalApk = Join-Path $OutputRoot "AutoDogovor-$AppVersion.apk"
 Copy-Item -LiteralPath $BuiltApk -Destination $FinalApk -Force
 $Hash = (Get-FileHash -LiteralPath $FinalApk -Algorithm SHA256).Hash
 Write-Host "APK: $FinalApk"

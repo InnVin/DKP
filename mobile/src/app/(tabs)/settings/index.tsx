@@ -6,7 +6,7 @@ import {
   makeRedirectUri,
   useAuthRequest,
 } from "expo-auth-session";
-import { Stack } from "expo-router";
+import { Stack, useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
@@ -20,6 +20,7 @@ import {
 } from "react-native";
 
 import { AppButton } from "@/components/app-button";
+import { SwipeView } from "@/components/swipe-view";
 import { secureSettings } from "@/lib/secure-settings";
 import { useAppColors } from "@/theme/use-app-colors";
 
@@ -75,6 +76,7 @@ function SettingField({
 
 export default function SettingsScreen() {
   const colors = useAppColors();
+  const router = useRouter();
   const [openRouterKey, setOpenRouterKey] = useState("");
   const [clientId, setClientId] = useState("");
   const [yandexConnected, setYandexConnected] = useState(false);
@@ -83,6 +85,7 @@ export default function SettingsScreen() {
   const [biometrics, setBiometrics] = useState(true);
   const [deletePhotos, setDeletePhotos] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
 
   const redirectUri = useMemo(() => makeRedirectUri({ scheme: "autodogovor" }), []);
   const authConfig: AuthRequestConfig = {
@@ -137,6 +140,7 @@ export default function SettingsScreen() {
 
   const save = async () => {
     setSaving(true);
+    setNotice(null);
     try {
       await Promise.all([
         secureSettings.setOpenRouterKey(openRouterKey),
@@ -151,8 +155,12 @@ export default function SettingsScreen() {
         setPin("");
       }
       Alert.alert("Сохранено", "Настройки защищённо сохранены на телефоне.");
+      setNotice({ text: "Настройки сохранены.", error: false });
     } catch (error) {
-      Alert.alert("Ошибка", error instanceof Error ? error.message : "Настройки не сохранены.");
+      setNotice({
+        text: error instanceof Error ? error.message : "Настройки не сохранены.",
+        error: true,
+      });
     } finally {
       setSaving(false);
     }
@@ -173,7 +181,7 @@ export default function SettingsScreen() {
   };
 
   return (
-    <>
+    <SwipeView onSwipeRight={() => router.navigate("/new")}>
       <Stack.Title>Настройки</Stack.Title>
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -193,6 +201,9 @@ export default function SettingsScreen() {
               secureTextEntry
               hint="Хранится только в защищённом хранилище телефона. Модель: Qwen3 VL 32B."
             />
+            <Text selectable style={{ color: colors.muted, fontSize: 12, lineHeight: 17 }}>
+              Вставьте ключ и нажмите «Сохранить настройки» внизу страницы.
+            </Text>
           </View>
 
           <View style={{ height: 1, backgroundColor: colors.outline }} />
@@ -269,9 +280,31 @@ export default function SettingsScreen() {
             </View>
           </View>
 
+          {notice ? (
+            <View
+              style={{
+                padding: 13,
+                borderRadius: 13,
+                borderCurve: "continuous",
+                borderWidth: notice.error ? 1 : 0,
+                borderColor: notice.error ? colors.error : "transparent",
+                backgroundColor: notice.error ? `${colors.error}18` : colors.primaryContainer,
+              }}
+            >
+              <Text
+                selectable
+                style={{
+                  color: notice.error ? colors.error : "#003733",
+                  fontWeight: "700",
+                }}
+              >
+                {notice.text}
+              </Text>
+            </View>
+          ) : null}
           <AppButton title="Сохранить настройки" onPress={save} loading={saving} />
         </ScrollView>
       </KeyboardAvoidingView>
-    </>
+    </SwipeView>
   );
 }

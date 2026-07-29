@@ -8,7 +8,7 @@ import { createDeal } from "@/lib/database";
 export default function NewDealScreen() {
   const router = useRouter();
   useEffect(() => {
-    void createDeal().then((id) => router.replace(`/deal/${id}`));
+    void createDeal().then((id) => router.replace(`/new/deal/${id}`));
   }, [router]);
   return (
     <>

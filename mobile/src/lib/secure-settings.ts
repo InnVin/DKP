@@ -8,6 +8,9 @@ const keys = {
   pinHash: "app_pin_hash",
   biometrics: "biometrics_enabled",
   deletePhotos: "delete_photos_after_export",
+  profileName: "profile_name",
+  profilePhone: "profile_phone",
+  profileOrganization: "profile_organization",
 } as const;
 
 export const secureSettings = {
@@ -46,4 +49,19 @@ export const secureSettings = {
     (await SecureStore.getItemAsync(keys.deletePhotos)) === "true",
   setDeletePhotos: (enabled: boolean) =>
     SecureStore.setItemAsync(keys.deletePhotos, String(enabled)),
+  getProfileName: () => SecureStore.getItemAsync(keys.profileName),
+  setProfileName: (value: string) =>
+    value.trim()
+      ? SecureStore.setItemAsync(keys.profileName, value.trim())
+      : SecureStore.deleteItemAsync(keys.profileName),
+  getProfilePhone: () => SecureStore.getItemAsync(keys.profilePhone),
+  setProfilePhone: (value: string) =>
+    value.trim()
+      ? SecureStore.setItemAsync(keys.profilePhone, value.trim())
+      : SecureStore.deleteItemAsync(keys.profilePhone),
+  getProfileOrganization: () => SecureStore.getItemAsync(keys.profileOrganization),
+  setProfileOrganization: (value: string) =>
+    value.trim()
+      ? SecureStore.setItemAsync(keys.profileOrganization, value.trim())
+      : SecureStore.deleteItemAsync(keys.profileOrganization),
 };
