@@ -11,6 +11,7 @@ const keys = {
   profileName: "profile_name",
   profilePhone: "profile_phone",
   profileOrganization: "profile_organization",
+  hybridServerUrl: "hybrid_server_url",
 } as const;
 
 export const secureSettings = {
@@ -64,4 +65,9 @@ export const secureSettings = {
     value.trim()
       ? SecureStore.setItemAsync(keys.profileOrganization, value.trim())
       : SecureStore.deleteItemAsync(keys.profileOrganization),
+  getHybridServerUrl: () => SecureStore.getItemAsync(keys.hybridServerUrl),
+  setHybridServerUrl: (value: string) =>
+    value.trim()
+      ? SecureStore.setItemAsync(keys.hybridServerUrl, value.trim())
+      : SecureStore.deleteItemAsync(keys.hybridServerUrl),
 };

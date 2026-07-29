@@ -3,21 +3,22 @@
     "name": "АвтоДоговор",
     "slug": "autodogovor",
     "scheme": "autodogovor",
-    "version": "1.0.1",
+    "version": "1.0.3",
     "orientation": "portrait",
     "icon": "./assets/autodogovor-icon.png",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "ru.avtodogovor.mobile",
-      "buildNumber": "2",
+      "buildNumber": "3",
       "infoPlist": {
         "NSFaceIDUsageDescription": "Биометрия защищает персональные данные в архиве договоров."
       }
     },
     "android": {
       "package": "ru.avtodogovor.mobile",
-      "versionCode": 2,
+      "versionCode": 3,
+      "allowBackup": false,
       "adaptiveIcon": {
         "backgroundColor": "#071A3A",
         "foregroundImage": "./assets/autodogovor-icon.png",
@@ -37,6 +38,14 @@
       "expo-sqlite",
       "expo-secure-store",
       "expo-local-authentication",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ],
       [
         "expo-image-picker",
         {

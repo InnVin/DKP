@@ -1,0 +1,29 @@
+{
+  "id": "/",
+  "name": "АвтоДоговор",
+  "short_name": "АвтоДоговор",
+  "description": "Подготовка договоров купли-продажи автомобилей с распознаванием документов",
+  "lang": "ru",
+  "dir": "ltr",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#F7F9FB",
+  "theme_color": "#071A3A",
+  "categories": ["business", "productivity"],
+  "icons": [
+    {
+      "src": "/pwa-assets/pwa-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-assets/pwa-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -22,6 +22,7 @@ from .ocr import normalize_fields
 
 ROOT = Path(__file__).resolve().parents[1]
 STATIC_DIR = ROOT / "app" / "static"
+MOBILE_ASSET_DIR = ROOT / "mobile" / "assets"
 ALLOWED_DOCUMENT_TYPES = {"auto", "seller_passport", "buyer_passport", "vehicle_docs", "pts", "sts", "old_contract", "other"}
 ALLOWED_EXTENSIONS = {
     ".jpg",
@@ -49,16 +50,21 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="АвтоДоговор", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="АвтоДоговор", version="1.0.3", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+if MOBILE_ASSET_DIR.exists():
+    app.mount("/pwa-assets", StaticFiles(directory=MOBILE_ASSET_DIR), name="pwa-assets")
 
 
 @app.middleware("http")
 async def disable_browser_cache(request, call_next):
     response = await call_next(request)
-    if request.url.path == "/" or request.url.path.startswith("/static/"):
+    if request.url.path in {"/", "/manifest.webmanifest", "/service-worker.js"} or request.url.path.startswith("/static/"):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Pragma"] = "no-cache"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = "camera=(self), microphone=(), geolocation=()"
     return response
 
 
@@ -115,6 +121,23 @@ def _persist_recognized_fields(deal_id: int, fields: dict[str, Any]) -> None:
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/manifest.webmanifest", include_in_schema=False)
+def web_manifest() -> FileResponse:
+    return FileResponse(
+        STATIC_DIR / "manifest.webmanifest",
+        media_type="application/manifest+json",
+    )
+
+
+@app.get("/service-worker.js", include_in_schema=False)
+def service_worker() -> FileResponse:
+    return FileResponse(
+        STATIC_DIR / "service-worker.js",
+        media_type="application/javascript",
+        headers={"Service-Worker-Allowed": "/"},
+    )
 
 
 @app.get("/api/health")
