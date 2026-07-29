@@ -46,6 +46,7 @@ export default function RootLayout() {
           headerBackButtonDisplayMode: "minimal",
         }}
       >
+        <Stack.Screen name="hybrid" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       </Stack>
     </AppLock>

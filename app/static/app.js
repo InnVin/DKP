@@ -1112,5 +1112,83 @@ installFieldRecognitionButtons();
 newDeal();
 loadArchive().catch(e => showMessage(e.message, true));
 
+const installPwaButton = document.querySelector("#installPwa");
+let deferredInstallPrompt = null;
+
+function sendNativeMessage(type, payload = {}) {
+  if (!window.ReactNativeWebView?.postMessage) return false;
+  window.ReactNativeWebView.postMessage(JSON.stringify({
+    version: 1,
+    type,
+    payload,
+  }));
+  return true;
+}
+
+function handleNativeMessage(event) {
+  let message;
+  try {
+    message = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+  } catch {
+    return;
+  }
+  if (!message || message.version !== 1 || typeof message.type !== "string") return;
+  if (message.type === "native.capabilities") {
+    document.documentElement.dataset.nativeCapabilities =
+      Object.keys(message.payload || {}).filter(key => message.payload[key]).join(",");
+  }
+  if (message.type === "native.visibility") {
+    document.documentElement.classList.toggle("native-app-active", Boolean(message.payload?.active));
+  }
+}
+
+if (window.ReactNativeWebView?.postMessage) {
+  document.documentElement.classList.add("hybrid-app");
+  sendNativeMessage("bridge.ready", {
+    appVersion: "1.0.3",
+    origin: window.location.origin,
+    online: navigator.onLine,
+  });
+  window.addEventListener("message", handleNativeMessage);
+  document.addEventListener("message", handleNativeMessage);
+}
+
+window.addEventListener("online", () => {
+  document.documentElement.classList.remove("is-offline");
+  sendNativeMessage("app.connectivity", { online: true });
+});
+window.addEventListener("offline", () => {
+  document.documentElement.classList.add("is-offline");
+  sendNativeMessage("app.connectivity", { online: false });
+});
+document.documentElement.classList.toggle("is-offline", !navigator.onLine);
+
+window.addEventListener("beforeinstallprompt", event => {
+  event.preventDefault();
+  deferredInstallPrompt = event;
+  if (!window.ReactNativeWebView?.postMessage) installPwaButton?.classList.remove("hidden");
+});
+
+installPwaButton?.addEventListener("click", async () => {
+  if (!deferredInstallPrompt) return;
+  deferredInstallPrompt.prompt();
+  await deferredInstallPrompt.userChoice;
+  deferredInstallPrompt = null;
+  installPwaButton.classList.add("hidden");
+});
+
+window.addEventListener("appinstalled", () => {
+  deferredInstallPrompt = null;
+  installPwaButton?.classList.add("hidden");
+});
+
+if ("serviceWorker" in navigator && (window.isSecureContext || window.location.hostname === "localhost")) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/service-worker.js", { scope: "/" }).catch(() => {
+      // Приложение продолжает работать онлайн, даже если браузер запретил Service Worker.
+    });
+  });
+}
+
 
 

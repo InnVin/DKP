@@ -3,8 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#071A3A">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="АвтоДоговор">
   <title>АвтоДоговор</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20260727-13">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="192x192" href="/pwa-assets/pwa-icon-192.png">
+  <link rel="apple-touch-icon" href="/pwa-assets/pwa-icon-192.png">
+  <link rel="stylesheet" href="/static/styles.css?v=20260729-103">
 </head>
 <body>
   <header class="topbar">
@@ -14,6 +22,7 @@
         <h1>АвтоДоговор</h1>
       </div>
       <div class="top-actions">
+        <button id="installPwa" class="button pwa-install-button hidden" type="button">Установить приложение</button>
         <button id="sidebarToggle" class="icon-button" type="button" title="Свернуть архив" aria-label="Свернуть архив"><span></span></button>
         <button id="topNewDeal" class="button primary" type="button">Создать ДКП</button>
         <button id="saveDeal" class="button primary">Сохранить</button>
@@ -187,7 +196,7 @@
     </section>
   </main>
 
-  <script src="/static/app.js?v=20260727-12"></script>
+  <script src="/static/app.js?v=20260729-103"></script>
 </body>
 </html>
 

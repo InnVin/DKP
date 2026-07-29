@@ -9,6 +9,10 @@ import {
   contractFileBase,
   contractHtml,
 } from "../src/lib/contract-template.ts";
+import {
+  isTrustedHybridNavigation,
+  normalizeHybridServerUrl,
+} from "../src/lib/hybrid-server.ts";
 
 const baseDeal = {
   contract_number: "12",
@@ -71,4 +75,19 @@ test("создаёт безопасное имя и HTML договора", () =
   assert.match(html, /ДОГОВОР КУПЛИ-ПРОДАЖИ/);
   assert.match(html, /JTDBR32E720123456/);
   assert.doesNotMatch(html, /undefined/);
+});
+
+test("разрешает безопасный адрес гибридного сервера", () => {
+  assert.equal(normalizeHybridServerUrl("https://dkp.example.ru/"), "https://dkp.example.ru");
+  assert.equal(normalizeHybridServerUrl("http://192.168.1.15:8000/"), "http://192.168.1.15:8000");
+  assert.throws(
+    () => normalizeHybridServerUrl("http://public.example.ru"),
+    /HTTPS/,
+  );
+});
+
+test("блокирует переход WebView на другой источник", () => {
+  const server = "https://dkp.example.ru";
+  assert.equal(isTrustedHybridNavigation(`${server}/api/health`, server), true);
+  assert.equal(isTrustedHybridNavigation("https://example.org/phishing", server), false);
 });
