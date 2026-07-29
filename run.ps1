@@ -1,5 +1,6 @@
 param(
-    [switch]$Lan
+    [switch]$Lan,
+    [switch]$NoBrowser
 )
 
 $ErrorActionPreference = "Stop"
@@ -25,7 +26,9 @@ foreach ($ProcessId in $Existing) {
     }
 }
 
-Start-Process "http://127.0.0.1:$Port"
+if (-not $NoBrowser) {
+    Start-Process "http://127.0.0.1:$Port"
+}
 Write-Host "AutoDogovor started: http://127.0.0.1:$Port" -ForegroundColor Green
 if ($Lan) {
     Write-Host "Local-network mode is enabled. Use only on a trusted Wi-Fi network." -ForegroundColor Yellow
