@@ -1,133 +1,162 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#071A3A">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f7470">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="АвтоДоговор">
-  <title>АвтоДоговор</title>
+  <title>АвтоДоговор 1.0.4</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" type="image/png" sizes="192x192" href="/pwa-assets/pwa-icon-192.png">
   <link rel="apple-touch-icon" href="/pwa-assets/pwa-icon-192.png">
-  <link rel="stylesheet" href="/static/styles.css?v=20260729-103">
+  <link rel="stylesheet" href="/static/styles.css?v=104">
 </head>
 <body>
-  <header class="topbar">
-    <div class="topbar-main">
-      <div>
-        <span class="eyebrow">Локально на вашем компьютере</span>
-        <h1>АвтоДоговор</h1>
-      </div>
-      <div class="top-actions">
-        <button id="installPwa" class="button pwa-install-button hidden" type="button">Установить приложение</button>
-        <button id="sidebarToggle" class="icon-button" type="button" title="Свернуть архив" aria-label="Свернуть архив"><span></span></button>
-        <button id="topNewDeal" class="button primary" type="button">Создать ДКП</button>
-        <button id="saveDeal" class="button primary">Сохранить</button>
-        <button id="makeContract" class="button accent">Excel</button>
-      </div>
+  <header class="app-header">
+    <button id="sidebarToggle" class="header-icon menu-icon" type="button" aria-label="Открыть меню"><span></span></button>
+    <div class="app-title">
+      <strong>АвтоДоговор</strong>
+      <span id="dealBadge">Новая ДКП</span>
     </div>
-    <section class="readiness-panel" aria-label="Готовность договора">
-      <div class="readiness-summary">
-        <span class="eyebrow">Контроль заполнения</span>
-        <h2 id="readinessTitle">Договор пока не заполнен</h2>
-        <p id="readinessHint">Загрузите документы или заполните поля вручную.</p>
-      </div>
-      <div class="readiness-score">
-        <strong id="readinessPercent">0%</strong>
-        <span>готово</span>
-      </div>
-      <div id="readinessChecks" class="readiness-checks"></div>
-    </section>
+    <button id="saveDeal" class="header-action" type="button">Сохранить</button>
   </header>
-  <div id="recognitionProgress" class="recognition-progress hidden" role="status" aria-live="polite">
-    <span class="recognition-progress-bar"></span>
-    <strong id="recognitionStage">Подготовка документов</strong>
-  </div>
 
-  <main class="layout">
-    <aside class="sidebar">
-      <div class="sidebar-title">
-        <h2>Архив ДКП</h2>
-        <span id="dealBadge" class="badge">Новая</span>
+  <main class="app-main">
+    <section id="dealView" class="app-view active" data-app-view="deal">
+      <nav id="dealTabs" class="deal-tabs" aria-label="Этапы заполнения">
+        <button class="active" type="button" data-deal-tab="documents"><b>1</b><span>Документы</span></button>
+        <button type="button" data-deal-tab="data"><b>2</b><span>Данные</span></button>
+        <button type="button" data-deal-tab="review"><b>3</b><span>Проверка</span></button>
+      </nav>
+
+      <div id="recognitionProgress" class="unified-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <span class="recognition-progress-bar"></span>
+        <strong id="recognitionStage" class="sr-only">Заполнено 0%</strong>
       </div>
-      <input id="archiveSearch" class="search" placeholder="VIN, кузов, СТС, госномер, продавец, покупатель">
-      <div id="message" class="message hidden"></div>
-      <div id="archiveList" class="archive-list"></div>
-      <div id="trashPanel" class="trash-panel"></div>
-    </aside>
 
-    <section class="workspace">
-      <section id="section-documents" class="upload-panel page-section">
-        <div class="upload-heading">
-          <span class="step">1</span>
+      <section class="deal-panel active" data-tab-panel="documents">
+        <div class="panel-heading">
           <div>
             <span class="eyebrow">Документы</span>
-            <h2>Загрузите документы</h2>
+            <h1>Загрузите документы</h1>
           </div>
-          <button id="reprocessDeal" class="button section-reprocess" type="button" title="Распознать все документы заново">
-            <span class="refresh-icon"></span><span class="reprocess-label">Распознать заново</span>
+          <button id="reprocessDeal" class="button primary recognize-all" type="button">
+            <span class="scan-symbol" aria-hidden="true"></span>
+            Распознать
           </button>
-          <button class="button clear-section icon-only" type="button" data-clear-section="documents" title="Очистить документы" aria-label="Очистить документы"></button>
-          <p>Добавляйте файлы в нужную графу. OpenRouter распознаёт поддерживаемые изображения; остальные форматы сохраняются как вложения.</p>
         </div>
-        <div id="uploadGrid" class="upload-grid">
-          <label class="upload-tile" data-type="seller_passport">
-            <span>Паспорт продавца <em>загрузить файл</em></span>
-            <small>Разворот и прописка</small>
-            <input type="file" data-document-type="seller_passport" accept=".jpg,.jpeg,.png,.webp,.heic,.bmp,.tif,.tiff,.psd,.pdf,.xls,.xlsx,.doc,.docx,.ppt,.pptx" multiple>
-          </label>
-          <label class="upload-tile" data-type="buyer_passport">
-            <span>Паспорт покупателя <em>загрузить файл</em></span>
-            <small>Разворот и прописка</small>
-            <input type="file" data-document-type="buyer_passport" accept=".jpg,.jpeg,.png,.webp,.heic,.bmp,.tif,.tiff,.psd,.pdf,.xls,.xlsx,.doc,.docx,.ppt,.pptx" multiple>
-          </label>
-          <label class="upload-tile" data-type="vehicle_docs">
-            <span>ПТС / СТС <em>загрузить файл</em></span>
-            <small>ПТС и обе стороны СТС одним комплектом</small>
-            <input type="file" data-document-type="vehicle_docs" accept=".jpg,.jpeg,.png,.webp,.heic,.bmp,.tif,.tiff,.psd,.pdf,.xls,.xlsx,.doc,.docx,.ppt,.pptx" multiple>
-          </label>
-          <label class="upload-tile" data-type="old_contract">
-            <span>Старый ДКП <em>загрузить файл</em></span>
-            <small>Печатный или рукописный</small>
-            <input type="file" data-document-type="old_contract" accept=".jpg,.jpeg,.png,.webp,.heic,.bmp,.tif,.tiff,.psd,.pdf,.xls,.xlsx,.doc,.docx,.ppt,.pptx" multiple>
-          </label>
-          <label class="upload-tile" data-type="other">
-            <span>Прочее <em>загрузить файл</em></span>
-            <small>Любые вложения</small>
-            <input type="file" data-document-type="other" accept=".jpg,.jpeg,.png,.webp,.heic,.bmp,.tif,.tiff,.psd,.pdf,.xls,.xlsx,.doc,.docx,.ppt,.pptx" multiple>
-          </label>
+        <p class="panel-help">Можно выбрать сразу несколько фотографий. Поворот снимков исправляется автоматически.</p>
+
+        <div id="uploadGrid" class="document-cards">
+          <article class="upload-tile" data-type="seller_passport">
+            <div class="document-card-title"><strong>Паспорт продавца</strong><span data-document-count>0</span></div>
+            <div class="tile-docs"></div>
+            <div class="document-actions">
+              <label class="icon-action" title="Сфотографировать паспорт продавца" aria-label="Сфотографировать паспорт продавца">
+                <span class="camera-symbol" aria-hidden="true"></span>
+                <input type="file" data-document-type="seller_passport" accept="image/*" capture="environment">
+              </label>
+              <label class="button outlined file-action">Выбрать фото
+                <input type="file" data-document-type="seller_passport" accept=".jpg,.jpeg,.png,.webp,.heic,.bmp,.tif,.tiff,.pdf" multiple>
+              </label>
+              <button class="icon-action recognize-one" type="button" data-card-recognize="seller_passport" title="Распознать паспорт продавца" aria-label="Распознать паспорт продавца">
+                <span class="scan-symbol" aria-hidden="true"></span>
+              </button>
+            </div>
+          </article>
+
+          <article class="upload-tile" data-type="buyer_passport">
+            <div class="document-card-title"><strong>Паспорт покупателя</strong><span data-document-count>0</span></div>
+            <div class="tile-docs"></div>
+            <div class="document-actions">
+              <label class="icon-action" title="Сфотографировать паспорт покупателя" aria-label="Сфотографировать паспорт покупателя">
+                <span class="camera-symbol" aria-hidden="true"></span>
+                <input type="file" data-document-type="buyer_passport" accept="image/*" capture="environment">
+              </label>
+              <label class="button outlined file-action">Выбрать фото
+                <input type="file" data-document-type="buyer_passport" accept=".jpg,.jpeg,.png,.webp,.heic,.bmp,.tif,.tiff,.pdf" multiple>
+              </label>
+              <button class="icon-action recognize-one" type="button" data-card-recognize="buyer_passport" title="Распознать паспорт покупателя" aria-label="Распознать паспорт покупателя">
+                <span class="scan-symbol" aria-hidden="true"></span>
+              </button>
+            </div>
+          </article>
+
+          <article class="upload-tile" data-type="vehicle_docs">
+            <div class="document-card-title"><strong>ПТС / СТС</strong><span data-document-count>0</span></div>
+            <div class="tile-docs"></div>
+            <div class="document-actions">
+              <label class="icon-action" title="Сфотографировать ПТС или СТС" aria-label="Сфотографировать ПТС или СТС">
+                <span class="camera-symbol" aria-hidden="true"></span>
+                <input type="file" data-document-type="vehicle_docs" accept="image/*" capture="environment">
+              </label>
+              <label class="button outlined file-action">Выбрать фото
+                <input type="file" data-document-type="vehicle_docs" accept=".jpg,.jpeg,.png,.webp,.heic,.bmp,.tif,.tiff,.pdf" multiple>
+              </label>
+              <button class="icon-action recognize-one" type="button" data-card-recognize="vehicle_docs" title="Распознать ПТС и СТС" aria-label="Распознать ПТС и СТС">
+                <span class="scan-symbol" aria-hidden="true"></span>
+              </button>
+            </div>
+          </article>
+
+          <article class="upload-tile" data-type="old_contract">
+            <div class="document-card-title"><strong>Старый ДКП</strong><span data-document-count>0</span></div>
+            <div class="tile-docs"></div>
+            <div class="document-actions">
+              <label class="icon-action" title="Сфотографировать старый ДКП" aria-label="Сфотографировать старый ДКП">
+                <span class="camera-symbol" aria-hidden="true"></span>
+                <input type="file" data-document-type="old_contract" accept="image/*" capture="environment">
+              </label>
+              <label class="button outlined file-action">Выбрать фото
+                <input type="file" data-document-type="old_contract" accept=".jpg,.jpeg,.png,.webp,.heic,.bmp,.tif,.tiff,.pdf" multiple>
+              </label>
+              <button class="icon-action recognize-one" type="button" data-card-recognize="old_contract" title="Распознать старый ДКП" aria-label="Распознать старый ДКП">
+                <span class="scan-symbol" aria-hidden="true"></span>
+              </button>
+            </div>
+          </article>
+
+          <article class="upload-tile" data-type="other">
+            <div class="document-card-title"><strong>Прочее</strong><span data-document-count>0</span></div>
+            <div class="tile-docs"></div>
+            <div class="document-actions">
+              <label class="icon-action" title="Сфотографировать документ" aria-label="Сфотографировать документ">
+                <span class="camera-symbol" aria-hidden="true"></span>
+                <input type="file" data-document-type="other" accept="image/*" capture="environment">
+              </label>
+              <label class="button outlined file-action">Выбрать фото
+                <input type="file" data-document-type="other" accept=".jpg,.jpeg,.png,.webp,.heic,.bmp,.tif,.tiff,.psd,.pdf,.xls,.xlsx,.doc,.docx,.ppt,.pptx" multiple>
+              </label>
+              <button class="icon-action recognize-one" type="button" data-card-recognize="other" title="Распознать документы" aria-label="Распознать документы">
+                <span class="scan-symbol" aria-hidden="true"></span>
+              </button>
+            </div>
+          </article>
         </div>
-        <div id="documentList" class="document-list"></div>
+        <div id="documentList" class="hidden"></div>
       </section>
 
-      <form id="dealForm">
-        <section id="section-contract" class="card page-section">
-          <div class="section-heading">
-            <span class="step">2</span>
-            <div><h2>Договор</h2><p>Общие данные сделки</p></div>
-            <button class="button section-reprocess" type="button" data-reprocess-section="contract">Распознать</button>
-            <button class="button clear-section icon-only" type="button" data-clear-section="contract" title="Очистить раздел" aria-label="Очистить раздел"></button>
-          </div>
-          <div class="grid four contract-grid">
-            <label>№ договора<input name="contract_number" inputmode="numeric"></label>
-            <label>Дата договора<input name="contract_date" type="date"></label>
-            <label>Место составления<input name="contract_place"></label>
-            <label>Стоимость, руб.<input name="price" inputmode="decimal"></label>
-          </div>
-        </section>
-
-        <div class="columns">
-          <section id="section-seller" class="card page-section">
-            <div class="section-heading">
-              <span class="step">3</span>
-              <div><h2>Продавец</h2><p>Данные владельца автомобиля</p></div>
-              <button class="button section-reprocess" type="button" data-reprocess-section="seller">Распознать</button>
-              <button class="button clear-section icon-only" type="button" data-clear-section="seller" title="Очистить раздел" aria-label="Очистить раздел"></button>
+      <section class="deal-panel" data-tab-panel="data">
+        <div class="panel-heading">
+          <div><span class="eyebrow">Данные</span><h1>Проверьте поля</h1></div>
+        </div>
+        <form id="dealForm" class="accordion-form">
+          <details id="section-contract" class="data-section page-section" open>
+            <summary><span><b>Договор</b><small data-section-summary="contract">Поля не заполнены</small></span><i></i></summary>
+            <div class="fields-grid four">
+              <label>№ договора<input name="contract_number" inputmode="numeric"></label>
+              <label>Дата договора<input name="contract_date" type="date"></label>
+              <label>Место составления<input name="contract_place"></label>
+              <label>Стоимость, руб.<input name="price" inputmode="decimal"></label>
             </div>
-            <div class="grid">
+          </details>
+
+          <details id="section-seller" class="data-section page-section">
+            <summary><span><b>Продавец</b><small data-section-summary="seller">Поля не заполнены</small></span><i></i></summary>
+            <div class="fields-grid">
               <label class="wide">ФИО<input name="seller_full_name"></label>
               <label>Дата рождения<input name="seller_birth_date"></label>
               <label>Телефон<input name="seller_phone"></label>
@@ -136,16 +165,11 @@
               <label class="wide">Кем выдан<textarea name="seller_passport_issued_by"></textarea></label>
               <label class="wide">Адрес<textarea name="seller_address"></textarea></label>
             </div>
-          </section>
+          </details>
 
-          <section id="section-buyer" class="card page-section">
-            <div class="section-heading">
-              <span class="step">4</span>
-              <div><h2>Покупатель</h2><p>Данные нового владельца</p></div>
-              <button class="button section-reprocess" type="button" data-reprocess-section="buyer">Распознать</button>
-              <button class="button clear-section icon-only" type="button" data-clear-section="buyer" title="Очистить раздел" aria-label="Очистить раздел"></button>
-            </div>
-            <div class="grid">
+          <details id="section-buyer" class="data-section page-section">
+            <summary><span><b>Покупатель</b><small data-section-summary="buyer">Поля не заполнены</small></span><i></i></summary>
+            <div class="fields-grid">
               <label class="wide">ФИО<input name="buyer_full_name"></label>
               <label>Дата рождения<input name="buyer_birth_date"></label>
               <label>Телефон<input name="buyer_phone"></label>
@@ -154,49 +178,120 @@
               <label class="wide">Кем выдан<textarea name="buyer_passport_issued_by"></textarea></label>
               <label class="wide">Адрес<textarea name="buyer_address"></textarea></label>
             </div>
-          </section>
+          </details>
+
+          <details id="section-vehicle" class="data-section page-section">
+            <summary><span><b>Автомобиль</b><small data-section-summary="vehicle">Поля не заполнены</small></span><i></i></summary>
+            <div class="fields-grid three">
+              <label class="wide">Марка и модель<input name="vehicle_make_model"></label>
+              <label>Категория ТС<input name="vehicle_type"></label>
+              <label>Год выпуска<input name="vehicle_year"></label>
+              <label>VIN<input name="vin" maxlength="17" value="ОТСУТСТВУЕТ"></label>
+              <label>Номер кузова<input name="body_number"></label>
+              <label>Номер шасси<input name="chassis_number" value="ОТСУТСТВУЕТ"></label>
+              <label>Цвет<input name="color"></label>
+              <label>Госномер<input name="registration_plate"></label>
+              <label>ПТС<input name="pts_series_number"></label>
+              <label>СТС<input name="sts_series_number"></label>
+            </div>
+          </details>
+
+          <details id="section-notes" class="data-section page-section">
+            <summary><span><b>Заметки распознавания</b><small data-section-summary="notes">Не печатаются в договоре</small></span><i></i></summary>
+            <div class="fields-grid three">
+              <label>Продавец<textarea name="seller_notes" rows="5"></textarea></label>
+              <label>Покупатель<textarea name="buyer_notes" rows="5"></textarea></label>
+              <label>Автомобиль<textarea name="vehicle_notes" rows="5"></textarea></label>
+            </div>
+            <textarea name="notes" class="hidden" aria-hidden="true"></textarea>
+          </details>
+        </form>
+      </section>
+
+      <section class="deal-panel" data-tab-panel="review">
+        <div class="panel-heading">
+          <div><span class="eyebrow">Проверка</span><h1>Договор и файлы</h1></div>
         </div>
-
-        <section id="section-vehicle" class="card page-section">
-          <div class="section-heading">
-            <span class="step">5</span>
-            <div><h2>Автомобиль</h2><p>Сверьте особенно VIN и номера документов</p></div>
-            <button class="button section-reprocess" type="button" data-reprocess-section="vehicle">Распознать</button>
-            <button class="button clear-section icon-only" type="button" data-clear-section="vehicle" title="Очистить раздел" aria-label="Очистить раздел"></button>
+        <section class="readiness-card" aria-label="Готовность договора">
+          <div class="readiness-score"><strong id="readinessPercent">0%</strong><span>заполнено</span></div>
+          <div class="readiness-summary">
+            <h2 id="readinessTitle">Договор пока не заполнен</h2>
+            <p id="readinessHint">Пустые поля не мешают создать договор.</p>
           </div>
-          <div class="grid three">
-            <label class="wide">Марка и модель<input name="vehicle_make_model"></label>
-            <label>Категория ТС<input name="vehicle_type"></label>
-            <label>Год выпуска<input name="vehicle_year"></label>
-            <label>VIN<input name="vin" maxlength="17" value="ОТСУТСТВУЕТ"></label>
-            <label>Номер кузова<input name="body_number"></label>
-            <label>Номер шасси<input name="chassis_number" value="ОТСУТСТВУЕТ"></label>
-            <label>Цвет<input name="color"></label>
-            <label>Госномер<input name="registration_plate"></label>
-            <label>ПТС<input name="pts_series_number"></label>
-            <label>СТС<input name="sts_series_number"></label>
-          </div>
+          <div id="readinessChecks" class="readiness-checks"></div>
         </section>
-
-        <section id="section-notes" class="card notes-card page-section">
-          <div class="section-heading">
-            <span class="step">!</span>
-            <div><h2>Заметки распознавания</h2><p>Это поле хранится в архиве, но никогда не печатается в договоре</p></div>
-            <button class="button section-reprocess" type="button" data-reprocess-section="notes">Распознать</button>
-            <button class="button clear-section icon-only" type="button" data-clear-section="notes" title="Очистить раздел" aria-label="Очистить раздел"></button>
-          </div>
-          <div class="notes-grid">
-            <label>Продавец<textarea name="seller_notes" rows="6"></textarea></label>
-            <label>Покупатель<textarea name="buyer_notes" rows="6"></textarea></label>
-            <label>Автомобиль<textarea name="vehicle_notes" rows="6"></textarea></label>
-          </div>
-          <textarea name="notes" class="legacy-notes" rows="1" aria-hidden="true"></textarea>
+        <section class="review-card">
+          <h2>Что проверить</h2>
+          <p>Особенно внимательно проверьте ФИО, паспортные данные, VIN, номера документов и стоимость.</p>
+          <div id="reviewWarnings" class="review-warnings"></div>
         </section>
-      </form>
+        <section class="review-card">
+          <div class="review-card-heading">
+            <div><h2>Готовые файлы</h2><p>Шаблон: MyFiles\BAZA.xls</p></div>
+            <button id="makeContract" class="button primary" type="button">Создать</button>
+          </div>
+          <div id="readyFiles" class="ready-files"><p class="empty-state">Файлы ещё не созданы.</p></div>
+        </section>
+      </section>
+
+      <button id="nextAction" class="floating-next" type="button">Далее</button>
+    </section>
+
+    <section id="archiveView" class="app-view" data-app-view="archive">
+      <div class="view-heading"><div><span class="eyebrow">Архив</span><h1>Сохранённые ДКП</h1></div><button id="archiveNewDeal" class="button primary">Новая ДКП</button></div>
+      <input id="archiveSearch" class="search" placeholder="Продавец, автомобиль, VIN, госномер или № ДКП">
+      <div id="archiveList" class="archive-list"></div>
+      <div id="trashPanel" class="trash-panel"></div>
+    </section>
+
+    <section id="settingsView" class="app-view" data-app-view="settings">
+      <div class="view-heading"><div><span class="eyebrow">Настройки</span><h1>Внешний вид</h1></div></div>
+      <section class="settings-card">
+        <h2>Тема</h2>
+        <div class="theme-options" role="group" aria-label="Тема приложения">
+          <button type="button" data-theme-choice="system">Системная</button>
+          <button type="button" data-theme-choice="light">Светлая</button>
+          <button type="button" data-theme-choice="dark">Тёмная</button>
+        </div>
+      </section>
+      <section class="settings-card">
+        <h2>Распознавание</h2>
+        <p id="ocrSettingsStatus">Проверяем подключение OpenRouter…</p>
+      </section>
+      <button id="installPwa" class="button outlined install-button hidden" type="button">Установить PWA</button>
     </section>
   </main>
 
-  <script src="/static/app.js?v=20260729-103"></script>
+  <section id="appMenuSheet" class="app-menu-sheet hidden" role="dialog" aria-modal="true" aria-label="Главное меню">
+    <button class="menu-sheet-backdrop" type="button" data-close-menu aria-label="Закрыть меню"></button>
+    <aside class="menu-sheet-panel">
+      <div class="menu-sheet-heading">
+        <div><strong>АвтоДоговор</strong><span id="webVersionLabel">Web/PWA 1.0.4</span></div>
+        <button class="menu-sheet-close" type="button" data-close-menu aria-label="Закрыть меню">×</button>
+      </div>
+      <button id="topNewDeal" type="button" data-app-action="new">Новая ДКП</button>
+      <button type="button" data-app-action="archive">Архив</button>
+      <button type="button" data-app-action="files">Файлы текущей ДКП</button>
+      <button type="button" data-app-action="settings">Настройки и тема</button>
+      <button type="button" data-app-action="install">Установить PWA</button>
+    </aside>
+  </section>
+
+  <section id="fileActionSheet" class="app-menu-sheet hidden" role="dialog" aria-modal="true" aria-label="Готовые файлы">
+    <button class="menu-sheet-backdrop" type="button" data-close-files aria-label="Закрыть"></button>
+    <div class="file-sheet-panel">
+      <div class="menu-sheet-heading">
+        <div><strong>Выберите формат</strong><span>Затем отправьте, скачайте или распечатайте</span></div>
+        <button class="menu-sheet-close" type="button" data-close-files aria-label="Закрыть">×</button>
+      </div>
+      <div id="readyFileOptions" class="ready-file-options"></div>
+    </div>
+  </section>
+
+  <div id="message" class="message hidden" role="status" aria-live="polite"></div>
+  <nav class="bottom-navigation" aria-label="Основные разделы"></nav>
+
+  <script src="/static/ui-config.js?v=104"></script>
+  <script src="/static/pwa.js?v=104"></script>
 </body>
 </html>
-

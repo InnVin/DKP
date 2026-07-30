@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import json
 import re
-import subprocess
-import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -11,12 +8,16 @@ from typing import Any
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
+from PIL import Image, ImageDraw, ImageFont
+import xlrd
+from xlutils.copy import copy as copy_xls
 
-from .database import OUTPUT_DIR, ROOT
+from . import database
 
-TEMPLATE_PATH = ROOT / "training_examples" / "Шаблон ДКП.xls"
-FILL_SCRIPT = ROOT / "tools" / "fill_contract_template.ps1"
-POWERSHELL = Path(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe")
+ROOT = database.ROOT
+TEMPLATE_PATH = ROOT / "MyFiles" / "BAZA.xls"
+FONT_REGULAR = Path(r"C:\Windows\Fonts\arial.ttf")
+FONT_BOLD = Path(r"C:\Windows\Fonts\arialbd.ttf")
 
 
 def _safe_name(value: str) -> str:
@@ -25,10 +26,9 @@ def _safe_name(value: str) -> str:
 
 
 def _output_path(deal_id: int, payload: dict[str, Any], suffix: str) -> Path:
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    folder = database.generated_dir(deal_id)
     person = payload.get("buyer_full_name") or payload.get("seller_full_name") or f"сделка_{deal_id}"
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return OUTPUT_DIR / f"ДКП_{_safe_name(str(person))}_{stamp}{suffix}"
+    return folder / f"ДКП_{_safe_name(str(person))}{suffix}"
 
 
 def _format_ru_date(value: Any) -> Any:
@@ -44,6 +44,159 @@ def _prepare_baza_payload(payload: dict[str, Any]) -> dict[str, Any]:
     for key in ("contract_date", "seller_passport_issue_date", "buyer_passport_issue_date"):
         prepared[key] = _format_ru_date(prepared.get(key, ""))
     return prepared
+
+
+def _image_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
+    path = FONT_BOLD if bold else FONT_REGULAR
+    return ImageFont.truetype(str(path), size=size)
+
+
+def _wrap_text(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont, width: int) -> list[str]:
+    words = str(text or "").split()
+    if not words:
+        return [""]
+    lines: list[str] = []
+    line = words[0]
+    for word in words[1:]:
+        candidate = f"{line} {word}"
+        if draw.textlength(candidate, font=font) <= width:
+            line = candidate
+        else:
+            lines.append(line)
+            line = word
+    lines.append(line)
+    return lines
+
+
+def _draw_wrapped(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    x: int,
+    y: int,
+    width: int,
+    font: ImageFont.FreeTypeFont,
+    *,
+    line_height: int,
+) -> int:
+    for line in _wrap_text(draw, text, font, width):
+        draw.text((x, y), line, fill="#111111", font=font)
+        y += line_height
+    return y
+
+
+def _render_contract_outputs(
+    pdf_path: Path,
+    jpg_path: Path,
+    payload: dict[str, Any],
+) -> None:
+    data = _prepare_baza_payload(payload)
+    image = Image.new("RGB", (1240, 1754), "white")
+    draw = ImageDraw.Draw(image)
+    regular = _image_font(20)
+    small = _image_font(18)
+    bold = _image_font(20, bold=True)
+    title = _image_font(27, bold=True)
+    left, right = 72, 1168
+    width = right - left
+    y = 55
+
+    heading = "Д О Г О В О Р"
+    draw.text(((1240 - draw.textlength(heading, font=title)) / 2, y), heading, fill="#111111", font=title)
+    y += 36
+    subtitle = "КУПЛИ - ПРОДАЖИ ТРАНСПОРТНОГО СРЕДСТВА"
+    draw.text(((1240 - draw.textlength(subtitle, font=bold)) / 2, y), subtitle, fill="#111111", font=bold)
+    y += 48
+    draw.text((left, y), str(data.get("contract_place", "")), fill="#111111", font=regular)
+    date_text = str(data.get("contract_date", ""))
+    draw.text((right - draw.textlength(date_text, font=regular), y), date_text, fill="#111111", font=regular)
+    y += 38
+
+    def section(text: str) -> None:
+        nonlocal y
+        draw.text((left, y), text, fill="#111111", font=bold)
+        y += 31
+
+    def field(label: str, value: Any) -> None:
+        nonlocal y
+        label_width = 330
+        lines = _wrap_text(draw, str(value or ""), regular, width - label_width)
+        row_height = max(31, len(lines) * 25 + 6)
+        draw.text((left + 10, y + 4), label, fill="#111111", font=bold)
+        line_y = y + 4
+        for line in lines:
+            draw.text((left + label_width, line_y), line, fill="#111111", font=regular)
+            line_y += 25
+        draw.line((left, y + row_height, right, y + row_height), fill="#c6c6c6", width=1)
+        y += row_height
+
+    section("1. Стороны договора.")
+    draw.text((left, y), "Продавец:", fill="#111111", font=bold)
+    y += 29
+    field("Гр.", data.get("seller_full_name"))
+    field("Паспорт:", f"{data.get('seller_passport', '')} от {data.get('seller_passport_issue_date', '')}".strip())
+    field("Выдан:", data.get("seller_passport_issued_by"))
+    field("Адрес:", data.get("seller_address"))
+    y += 6
+    draw.text((left, y), "Покупатель:", fill="#111111", font=bold)
+    y += 29
+    field("Гр.", data.get("buyer_full_name"))
+    field("Паспорт:", f"{data.get('buyer_passport', '')} от {data.get('buyer_passport_issue_date', '')}".strip())
+    field("Выдан:", data.get("buyer_passport_issued_by"))
+    field("Адрес:", data.get("buyer_address"))
+    y += 10
+
+    section("2. Предмет договора.")
+    y = _draw_wrapped(
+        draw,
+        "2.1. Продавец обязуется передать в собственность покупателя, а покупатель обязуется принять и оплатить следующее транспортное средство (далее ТС):",
+        left,
+        y,
+        width,
+        small,
+        line_height=23,
+    ) + 5
+    for label, key in (
+        ("Марка, модель", "vehicle_make_model"),
+        ("Тип транспортного средства", "vehicle_type"),
+        ("Год изготовления ТС", "vehicle_year"),
+        ("Идент. № (VIN)", "vin"),
+        ("№ кузова:", "body_number"),
+        ("№ шасси (рамы):", "chassis_number"),
+        ("Цвет", "color"),
+        ("Паспорт ТС", "pts_series_number"),
+        ("СТС СОР", "sts_series_number"),
+        ("Госномер", "registration_plate"),
+    ):
+        field(label, data.get(key))
+
+    section("3. Стоимость ТС и порядок оплаты.")
+    y = _draw_wrapped(
+        draw,
+        f"3.1. Стоимость {data.get('price', '')} рублей. 3.2. Покупатель оплачивает стоимость автомобиля наличными и/или безналичными денежными средствами в момент подписания настоящего договора. 3.3. Продавец передает ТС в момент подписания настоящего договора.",
+        left,
+        y,
+        width,
+        small,
+        line_height=22,
+    ) + 7
+    section("4. Заключительные положения")
+    y = _draw_wrapped(
+        draw,
+        "4.1. Договор вступает в силу с момента его подписания сторонами. 4.2. Настоящий договор также является Актом приема-передачи ТС и составлен в трех экземплярах, имеющих одинаковую юридическую силу. 4.3. Договор может быть изменен Дополнительным соглашением по согласию сторон. 4.4. Стороны не имеют претензий друг к другу.",
+        left,
+        y,
+        width,
+        small,
+        line_height=22,
+    )
+    signature_y = min(1680, max(y + 34, 1600))
+    half = width // 2 - 30
+    draw.line((left, signature_y, left + half, signature_y), fill="#222222", width=1)
+    draw.line((right - half, signature_y, right, signature_y), fill="#222222", width=1)
+    draw.text((left, signature_y + 7), f"Продавец: {data.get('seller_full_name', '')}", fill="#111111", font=small)
+    draw.text((right - half, signature_y + 7), f"Покупатель: {data.get('buyer_full_name', '')}", fill="#111111", font=small)
+    image.save(jpg_path, "JPEG", quality=94, optimize=True)
+    image.save(pdf_path, "PDF", resolution=150.0)
 
 
 def _write_default_workbook(path: Path, payload: dict[str, Any]) -> None:
@@ -155,57 +308,86 @@ def _write_default_workbook(path: Path, payload: dict[str, Any]) -> None:
     wb.save(path)
 
 
-def _fill_baza_copy(template: Path, path: Path, payload: dict[str, Any]) -> int:
-    if not POWERSHELL.exists():
-        raise RuntimeError("Не найден Windows PowerShell для работы с шаблоном .xls")
-    if not FILL_SCRIPT.exists():
-        raise RuntimeError("Не найден служебный сценарий заполнения BAZA.xls")
+def _fill_baza_copy(
+    template: Path,
+    xls_path: Path,
+    pdf_path: Path,
+    jpg_path: Path,
+    payload: dict[str, Any],
+) -> None:
+    xls_path.parent.mkdir(parents=True, exist_ok=True)
+    data = _prepare_baza_payload(payload)
+    source = xlrd.open_workbook(str(template), formatting_info=True)
+    writable = copy_xls(source)
+    sheet = writable.get_sheet(source.sheet_names().index("Пуст"))
+    cells = {
+        (3, 0): data.get("contract_place"),
+        (3, 9): data.get("contract_date"),
+        (8, 1): data.get("seller_full_name"),
+        (9, 3): data.get("seller_passport"),
+        (9, 7): data.get("seller_passport_issue_date"),
+        (10, 3): data.get("seller_passport_issued_by"),
+        (11, 3): data.get("seller_address"),
+        (14, 1): data.get("buyer_full_name"),
+        (15, 3): data.get("buyer_passport"),
+        (15, 7): data.get("buyer_passport_issue_date"),
+        (16, 3): data.get("buyer_passport_issued_by"),
+        (17, 3): data.get("buyer_address"),
+        (21, 3): data.get("vehicle_make_model"),
+        (22, 3): data.get("vehicle_type"),
+        (23, 3): data.get("vehicle_year"),
+        (24, 3): data.get("vin"),
+        (25, 3): data.get("body_number"),
+        (26, 3): data.get("chassis_number"),
+        (27, 3): data.get("color"),
+        (28, 3): data.get("pts_series_number"),
+        (29, 3): data.get("sts_series_number"),
+        (30, 3): data.get("registration_plate"),
+        (33, 3): data.get("price"),
+        (42, 6): data.get("seller_full_name"),
+        (45, 6): data.get("buyer_full_name"),
+    }
+    for (row, column), value in cells.items():
+        if value is not None and str(value).strip():
+            sheet.write(row, column, str(value))
+    writable.save(str(xls_path))
+    _render_contract_outputs(pdf_path, jpg_path, payload)
 
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        suffix=".json",
-        encoding="utf-8",
-        delete=False,
-        dir=OUTPUT_DIR,
-    ) as file:
-        json.dump(_prepare_baza_payload(payload), file, ensure_ascii=False)
-        json_path = Path(file.name)
 
-    try:
-        result = subprocess.run(
-            [
-                str(POWERSHELL),
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                str(FILL_SCRIPT),
-                "-TemplatePath",
-                str(template),
-                "-OutputPath",
-                str(path),
-                "-JsonPath",
-                str(json_path),
-            ],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=60,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "Ошибка заполнения BAZA.xls")
-        return int(str(payload.get("contract_number") or 0))
-    finally:
-        json_path.unlink(missing_ok=True)
-
-
-def create_contract(deal_id: int, payload: dict[str, Any]) -> tuple[Path, str]:
+def create_contract(deal_id: int, payload: dict[str, Any]) -> list[dict[str, str]]:
     if TEMPLATE_PATH.exists():
-        target = _output_path(deal_id, payload, ".xls")
-        record_id = _fill_baza_copy(TEMPLATE_PATH, target, payload)
-        return target, f"Шаблон ДКП.xls, договор № {record_id}"
+        xls_path = _output_path(deal_id, payload, ".xls")
+        pdf_path = _output_path(deal_id, payload, ".pdf")
+        jpg_path = _output_path(deal_id, payload, ".jpg")
+        _fill_baza_copy(TEMPLATE_PATH, xls_path, pdf_path, jpg_path, payload)
+        return [
+            {
+                "kind": "xls",
+                "name": xls_path.name,
+                "stored_path": str(xls_path),
+                "media_type": "application/vnd.ms-excel",
+            },
+            {
+                "kind": "pdf",
+                "name": pdf_path.name,
+                "stored_path": str(pdf_path),
+                "media_type": "application/pdf",
+            },
+            {
+                "kind": "jpg",
+                "name": jpg_path.name,
+                "stored_path": str(jpg_path),
+                "media_type": "image/jpeg",
+            },
+        ]
 
     target = _output_path(deal_id, payload, ".xlsx")
     _write_default_workbook(target, payload)
-    return target, "Резервный шаблон .xlsx"
+    return [
+        {
+            "kind": "xlsx",
+            "name": target.name,
+            "stored_path": str(target),
+            "media_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        }
+    ]

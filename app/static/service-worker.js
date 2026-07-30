@@ -1,9 +1,10 @@
-const CACHE_VERSION = "autodogovor-pwa-1.0.3";
+const CACHE_VERSION = "autodogovor-pwa-1.0.4-r2";
 const APP_SHELL = [
   "/",
   "/manifest.webmanifest",
-  "/static/styles.css?v=20260729-103",
-  "/static/app.js?v=20260729-103",
+  "/static/ui-config.js?v=104",
+  "/static/styles.css?v=104",
+  "/static/pwa.js?v=104",
   "/pwa-assets/pwa-icon-192.png",
   "/pwa-assets/pwa-icon-512.png",
 ];

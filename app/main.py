@@ -5,10 +5,12 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from PIL import Image, ImageOps
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
@@ -50,7 +52,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="АвтоДоговор", version="1.0.3", lifespan=lifespan)
+app = FastAPI(title="АвтоДоговор", version="1.0.4", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 if MOBILE_ASSET_DIR.exists():
     app.mount("/pwa-assets", StaticFiles(directory=MOBILE_ASSET_DIR), name="pwa-assets")
@@ -114,8 +116,26 @@ def _persist_recognized_fields(deal_id: int, fields: dict[str, Any]) -> None:
         return
     deal.pop("_meta", None)
     deal.pop("documents", None)
+    deal.pop("generated_files", None)
     deal.update({key: value for key, value in fields.items() if value not in (None, "")})
     database.save_deal(deal, deal_id)
+
+
+def _normalize_uploaded_orientation(path: Path) -> None:
+    if path.suffix.lower() not in {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}:
+        return
+    try:
+        with Image.open(path) as source:
+            orientation = source.getexif().get(274, 1)
+            if orientation in (None, 1):
+                return
+            normalized = ImageOps.exif_transpose(source)
+            save_options: dict[str, Any] = {}
+            if path.suffix.lower() in {".jpg", ".jpeg"}:
+                save_options = {"quality": 95, "optimize": True}
+            normalized.save(path, **save_options)
+    except (OSError, ValueError):
+        return
 
 
 @app.get("/")
@@ -170,6 +190,10 @@ def read_deal(deal_id: int) -> dict[str, Any]:
     deal = database.get_deal(deal_id)
     if not deal:
         raise HTTPException(404, "Сделка не найдена")
+    deal["generated_files"] = [
+        _generated_file_payload(item)
+        for item in deal.get("generated_files", [])
+    ]
     return deal
 
 
@@ -198,11 +222,11 @@ async def upload_document(
     if suffix not in ALLOWED_EXTENSIONS:
         raise HTTPException(400, "Формат файла не поддерживается")
 
-    folder = database.UPLOAD_DIR / str(deal_id)
-    folder.mkdir(parents=True, exist_ok=True)
+    folder = database.documents_dir(deal_id)
     stored = folder / f"{uuid.uuid4().hex}{suffix}"
     with stored.open("wb") as destination:
         shutil.copyfileobj(file.file, destination)
+    _normalize_uploaded_orientation(stored)
     if defer_ocr:
         result = {
             "status": "stored_for_batch",
@@ -463,23 +487,66 @@ def make_contract(deal_id: int) -> dict[str, Any]:
         raise HTTPException(404, "Сделка не найдена")
     deal.pop("_meta", None)
     deal.pop("documents", None)
+    deal.pop("generated_files", None)
     try:
-        path, template_name = create_contract(deal_id, deal)
+        files = create_contract(deal_id, deal)
+        stored_files = database.replace_generated_files(deal_id, files)
     except Exception as exc:
-        raise HTTPException(500, f"Не удалось создать Excel: {exc}") from exc
+        raise HTTPException(500, f"Не удалось создать готовые файлы: {exc}") from exc
     return {
-        "filename": path.name,
-        "download_url": f"/api/contracts/{path.name}",
-        "template": template_name,
+        "template": "MyFiles/BAZA.xls",
+        "files": [_generated_file_payload(item) for item in stored_files],
     }
 
 
-@app.get("/api/contracts/{filename}")
-def download_contract(filename: str) -> FileResponse:
-    safe_name = Path(filename).name
-    path = database.OUTPUT_DIR / safe_name
+def _generated_file_payload(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": item["id"],
+        "kind": item["kind"],
+        "name": item["name"],
+        "media_type": item["media_type"],
+        "file_size": item.get("file_size", 0),
+        "download_url": f"/api/deals/{item['deal_id']}/files/{item['id']}",
+    }
+
+
+@app.get("/api/deals/{deal_id}/files")
+def list_ready_files(deal_id: int) -> list[dict[str, Any]]:
+    if not database.get_deal(deal_id):
+        raise HTTPException(404, "Сделка не найдена")
+    return [
+        _generated_file_payload(item)
+        for item in database.list_generated_files(deal_id)
+    ]
+
+
+@app.get("/api/deals/{deal_id}/files/{file_id}")
+def download_ready_file(deal_id: int, file_id: int, inline: bool = False) -> FileResponse:
+    item = database.get_generated_file(deal_id, file_id)
+    if not item:
+        raise HTTPException(404, "Готовый файл не найден")
+    path = Path(item["stored_path"])
     if not path.exists():
-        raise HTTPException(404, "Договор не найден")
-    return FileResponse(path, filename=safe_name)
+        raise HTTPException(404, "Файл отсутствует на диске")
+    headers = {}
+    filename = Path(item["name"]).name
+    if inline:
+        headers["Content-Disposition"] = f"inline; filename*=UTF-8''{quote(filename)}"
+    return FileResponse(
+        path,
+        filename=None if inline else filename,
+        media_type=item["media_type"],
+        headers=headers,
+    )
+
+
+@app.get("/api/contracts/{filename}")
+def download_legacy_contract(filename: str) -> FileResponse:
+    safe_name = Path(filename).name
+    for folder in (database.LEGACY_OUTPUT_DIR, database.OUTPUT_DIR):
+        path = folder / safe_name
+        if path.exists():
+            return FileResponse(path, filename=safe_name)
+    raise HTTPException(404, "Договор не найден")
 
 

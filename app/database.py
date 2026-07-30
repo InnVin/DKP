@@ -10,14 +10,32 @@ from typing import Any, Iterator
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data"
+DEALS_DIR = DATA_DIR / "deals"
 UPLOAD_DIR = DATA_DIR / "uploads"
 OUTPUT_DIR = DATA_DIR / "contracts"
+LEGACY_OUTPUT_DIR = DATA_DIR / "legacy_contracts"
 DB_PATH = DATA_DIR / "autodogovor.sqlite3"
 
 
 def ensure_storage() -> None:
-    for path in (DATA_DIR, UPLOAD_DIR, OUTPUT_DIR):
+    for path in (DATA_DIR, DEALS_DIR, UPLOAD_DIR, OUTPUT_DIR, LEGACY_OUTPUT_DIR):
         path.mkdir(parents=True, exist_ok=True)
+
+
+def deal_dir(deal_id: int) -> Path:
+    return DEALS_DIR / str(int(deal_id))
+
+
+def documents_dir(deal_id: int) -> Path:
+    path = deal_dir(deal_id) / "documents"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def generated_dir(deal_id: int) -> Path:
+    path = deal_dir(deal_id) / "generated"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 @contextmanager
@@ -65,15 +83,76 @@ def init_db() -> None:
                 FOREIGN KEY (deal_id) REFERENCES deals(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS generated_files (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                deal_id INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                name TEXT NOT NULL,
+                stored_path TEXT NOT NULL,
+                media_type TEXT NOT NULL,
+                FOREIGN KEY (deal_id) REFERENCES deals(id) ON DELETE CASCADE
+            );
+
             CREATE INDEX IF NOT EXISTS idx_deals_seller ON deals(seller_full_name);
             CREATE INDEX IF NOT EXISTS idx_deals_buyer ON deals(buyer_full_name);
             CREATE INDEX IF NOT EXISTS idx_deals_vin ON deals(vin);
             CREATE INDEX IF NOT EXISTS idx_deals_plate ON deals(registration_plate);
+            CREATE INDEX IF NOT EXISTS idx_generated_files_deal ON generated_files(deal_id);
             """
         )
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(deals)").fetchall()}
         if "deleted_at" not in columns:
             conn.execute("ALTER TABLE deals ADD COLUMN deleted_at TEXT NOT NULL DEFAULT ''")
+        _migrate_document_storage(conn)
+    _preserve_legacy_outputs()
+
+
+def _unique_target(folder: Path, name: str, prefix: str = "") -> Path:
+    safe_name = Path(name).name
+    target = folder / f"{prefix}{safe_name}"
+    if not target.exists():
+        return target
+    stem = target.stem
+    suffix = target.suffix
+    index = 2
+    while True:
+        candidate = folder / f"{stem}_{index}{suffix}"
+        if not candidate.exists():
+            return candidate
+        index += 1
+
+
+def _migrate_document_storage(conn: sqlite3.Connection) -> None:
+    rows = conn.execute("SELECT id, deal_id, stored_path FROM documents").fetchall()
+    for row in rows:
+        source = Path(row["stored_path"])
+        folder = documents_dir(int(row["deal_id"]))
+        try:
+            resolved = source.resolve()
+            if folder.resolve() in resolved.parents or not source.exists():
+                continue
+            target = _unique_target(folder, source.name, f"{row['id']}_")
+            shutil.move(str(source), str(target))
+            conn.execute(
+                "UPDATE documents SET stored_path=? WHERE id=?",
+                (str(target), int(row["id"])),
+            )
+        except OSError:
+            continue
+
+
+def _preserve_legacy_outputs() -> None:
+    if not OUTPUT_DIR.exists():
+        return
+    for source in OUTPUT_DIR.iterdir():
+        if not source.is_file():
+            continue
+        try:
+            target = _unique_target(LEGACY_OUTPUT_DIR, source.name)
+            shutil.move(str(source), str(target))
+        except OSError:
+            continue
 
 
 def _summary(payload: dict[str, Any]) -> dict[str, str]:
@@ -184,6 +263,7 @@ def get_deal(deal_id: int, include_deleted: bool = False) -> dict[str, Any] | No
             if path_row:
                 path = Path(path_row["stored_path"])
                 doc["file_size"] = path.stat().st_size if path.exists() else 0
+        payload["generated_files"] = list_generated_files(deal_id, conn=conn)
         return payload
 
 
@@ -224,11 +304,19 @@ def permanently_delete_deal(deal_id: int) -> bool:
                 (deal_id,),
             ).fetchall()
         ]
+        generated_paths = [
+            Path(item["stored_path"])
+            for item in conn.execute(
+                "SELECT stored_path FROM generated_files WHERE deal_id=?",
+                (deal_id,),
+            ).fetchall()
+        ]
         conn.execute("DELETE FROM documents WHERE deal_id=?", (deal_id,))
+        conn.execute("DELETE FROM generated_files WHERE deal_id=?", (deal_id,))
         conn.execute("DELETE FROM deals WHERE id=?", (deal_id,))
-    for path in paths:
+    for path in [*paths, *generated_paths]:
         _delete_upload_file(path)
-    folder = UPLOAD_DIR / str(deal_id)
+    folder = deal_dir(deal_id)
     if folder.exists():
         shutil.rmtree(folder, ignore_errors=True)
     return True
@@ -273,6 +361,14 @@ def search_deals(query: str = "") -> list[dict[str, Any]]:
             if full_row:
                 payload = json.loads(full_row["payload_json"])
                 item.update({key: payload.get(key, "") for key in payload.keys() if isinstance(payload.get(key), str)})
+            item["document_count"] = conn.execute(
+                "SELECT COUNT(*) FROM documents WHERE deal_id=?",
+                (row["id"],),
+            ).fetchone()[0]
+            item["generated_count"] = conn.execute(
+                "SELECT COUNT(*) FROM generated_files WHERE deal_id=?",
+                (row["id"],),
+            ).fetchone()[0]
             result.append(item)
         return result
 
@@ -335,6 +431,84 @@ def get_document_path(document_id: int) -> Path | None:
     return Path(row["stored_path"]) if row else None
 
 
+def replace_generated_files(deal_id: int, files: list[dict[str, str]]) -> list[dict[str, Any]]:
+    now = datetime.now().isoformat(timespec="seconds")
+    with connection() as conn:
+        old_paths = [
+            Path(item["stored_path"])
+            for item in conn.execute(
+                "SELECT stored_path FROM generated_files WHERE deal_id=?",
+                (deal_id,),
+            ).fetchall()
+        ]
+        conn.execute("DELETE FROM generated_files WHERE deal_id=?", (deal_id,))
+        for item in files:
+            conn.execute(
+                """
+                INSERT INTO generated_files (
+                    deal_id, created_at, kind, name, stored_path, media_type
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    deal_id,
+                    now,
+                    item["kind"],
+                    item["name"],
+                    item["stored_path"],
+                    item["media_type"],
+                ),
+            )
+    current_paths = {Path(item["stored_path"]).resolve() for item in files}
+    for path in old_paths:
+        try:
+            if path.resolve() not in current_paths:
+                _delete_upload_file(path)
+        except OSError:
+            continue
+    return list_generated_files(deal_id)
+
+
+def list_generated_files(
+    deal_id: int,
+    *,
+    conn: sqlite3.Connection | None = None,
+) -> list[dict[str, Any]]:
+    owns_connection = conn is None
+    db = conn or sqlite3.connect(DB_PATH)
+    if owns_connection:
+        db.row_factory = sqlite3.Row
+    try:
+        rows = db.execute(
+            """
+            SELECT id, deal_id, created_at, kind, name, stored_path, media_type
+            FROM generated_files WHERE deal_id=? ORDER BY id
+            """,
+            (deal_id,),
+        ).fetchall()
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            path = Path(item["stored_path"])
+            item["file_size"] = path.stat().st_size if path.exists() else 0
+            result.append(item)
+        return result
+    finally:
+        if owns_connection:
+            db.close()
+
+
+def get_generated_file(deal_id: int, file_id: int) -> dict[str, Any] | None:
+    with connection() as conn:
+        row = conn.execute(
+            """
+            SELECT id, deal_id, created_at, kind, name, stored_path, media_type
+            FROM generated_files WHERE id=? AND deal_id=?
+            """,
+            (file_id, deal_id),
+        ).fetchone()
+    return dict(row) if row else None
+
+
 def delete_document(document_id: int) -> bool:
     with connection() as conn:
         row = conn.execute("SELECT stored_path FROM documents WHERE id=?", (document_id,)).fetchone()
@@ -373,8 +547,8 @@ def update_document_ocr(document_id: int, text: str, status: str) -> None:
 def _delete_upload_file(path: Path) -> None:
     try:
         resolved = path.resolve()
-        upload_root = UPLOAD_DIR.resolve()
-        if upload_root not in resolved.parents:
+        allowed_roots = (UPLOAD_DIR.resolve(), DEALS_DIR.resolve())
+        if not any(root in resolved.parents for root in allowed_roots):
             return
         if resolved.exists() and resolved.is_file():
             resolved.unlink()
