@@ -44,7 +44,7 @@ if (-not $SkipSync) {
     & robocopy.exe `
         $SourceRoot `
         $BuildProject `
-        /E `
+        /MIR `
         /R:2 `
         /W:1 `
         /XD node_modules android output .expo .local-toolchain dist-check `

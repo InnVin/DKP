@@ -22,7 +22,7 @@ export default function RootLayout() {
   if (error) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <ScreenLoading label={error} />
+        <ScreenLoading label={error} error />
       </View>
     );
   }

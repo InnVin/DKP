@@ -3,7 +3,7 @@ import { Stack } from "expo-router/stack";
 import { AppMenuButton } from "@/components/app-menu-button";
 import { useAppColors } from "@/theme/use-app-colors";
 
-export default function SettingsLayout() {
+export default function ProfileLayout() {
   const colors = useAppColors();
   return (
     <Stack
@@ -16,8 +16,7 @@ export default function SettingsLayout() {
         headerLeft: () => <AppMenuButton />,
       }}
     >
-      <Stack.Screen name="index" options={{ title: "Настройки" }} />
-      <Stack.Screen name="admin" options={{ title: "Админка" }} />
+      <Stack.Screen name="index" options={{ title: "Профиль" }} />
     </Stack>
   );
 }

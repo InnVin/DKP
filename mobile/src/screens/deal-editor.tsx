@@ -660,7 +660,7 @@ export function DealEditor({ dealId }: { dealId: number }) {
   return (
     <SwipeView
       onSwipeLeft={() =>
-        stepIndex < steps.length - 1 ? void nextStep(1) : router.navigate("/settings")
+        stepIndex < steps.length - 1 ? void nextStep(1) : router.navigate("/profile")
       }
       onSwipeRight={() => (stepIndex > 0 ? void nextStep(-1) : router.navigate("/archive"))}
     >

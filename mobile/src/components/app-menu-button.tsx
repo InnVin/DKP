@@ -1,3 +1,4 @@
+import Constants from "expo-constants";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import { Modal, Pressable, ScrollView, Text, View } from "react-native";
@@ -9,7 +10,7 @@ const menuItems = [
   { label: "Архив", href: "/archive" },
   { label: "Новый ДКП", href: "/new" },
   { label: "Файлы", href: "/archive/files" },
-  { label: "Профиль", href: "/settings/profile" },
+  { label: "Профиль", href: "/profile" },
   { label: "Настройки", href: "/settings" },
   { label: "Админка", href: "/settings/admin" },
 ] as const;
@@ -66,7 +67,9 @@ export function AppMenuButton() {
                 <Text style={{ color: colors.text, fontSize: 24, fontWeight: "800" }}>
                   АвтоДоговор
                 </Text>
-                <Text style={{ color: colors.muted, fontSize: 13 }}>Версия 1.0.1</Text>
+                <Text style={{ color: colors.muted, fontSize: 13 }}>
+                  Версия {Constants.expoConfig?.version ?? "1.0.1.1"}
+                </Text>
               </View>
               {menuItems.map((item) => (
                 <Pressable

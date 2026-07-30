@@ -23,7 +23,7 @@ export default function AdminScreen() {
   );
 
   const rows = [
-    ["Версия приложения", Constants.expoConfig?.version ?? "1.0.1"],
+    ["Версия приложения", Constants.expoConfig?.version ?? "1.0.1.1"],
     ["Договоров в архиве", String(stats.deals)],
     ["Договоров в корзине", String(stats.trash)],
     ["Готовых файлов", String(stats.files)],

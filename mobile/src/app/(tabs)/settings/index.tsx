@@ -181,7 +181,7 @@ export default function SettingsScreen() {
   };
 
   return (
-    <SwipeView onSwipeRight={() => router.navigate("/new")}>
+    <SwipeView onSwipeRight={() => router.navigate("/profile")}>
       <Stack.Title>Настройки</Stack.Title>
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : undefined}

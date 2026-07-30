@@ -46,31 +46,49 @@ export default function ProfileScreen() {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [organization, setOrganization] = useState("");
-  const [saved, setSaved] = useState(false);
+  const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
 
   useEffect(() => {
     void Promise.all([
       secureSettings.getProfileName(),
       secureSettings.getProfilePhone(),
       secureSettings.getProfileOrganization(),
-    ]).then(([storedName, storedPhone, storedOrganization]) => {
-      setName(storedName ?? "");
-      setPhone(storedPhone ?? "");
-      setOrganization(storedOrganization ?? "");
-    });
+    ])
+      .then(([storedName, storedPhone, storedOrganization]) => {
+        setName(storedName ?? "");
+        setPhone(storedPhone ?? "");
+        setOrganization(storedOrganization ?? "");
+      })
+      .catch((reason) =>
+        setNotice({
+          text: reason instanceof Error ? reason.message : "Не удалось открыть профиль.",
+          error: true,
+        }),
+      );
   }, []);
 
   const save = async () => {
-    await Promise.all([
-      secureSettings.setProfileName(name),
-      secureSettings.setProfilePhone(phone),
-      secureSettings.setProfileOrganization(organization),
-    ]);
-    setSaved(true);
+    setNotice(null);
+    try {
+      await Promise.all([
+        secureSettings.setProfileName(name),
+        secureSettings.setProfilePhone(phone),
+        secureSettings.setProfileOrganization(organization),
+      ]);
+      setNotice({ text: "Профиль сохранён.", error: false });
+    } catch (reason) {
+      setNotice({
+        text: reason instanceof Error ? reason.message : "Не удалось сохранить профиль.",
+        error: true,
+      });
+    }
   };
 
   return (
-    <SwipeView onSwipeRight={() => router.navigate("/archive")}>
+    <SwipeView
+      onSwipeLeft={() => router.navigate("/settings")}
+      onSwipeRight={() => router.navigate("/new")}
+    >
       <Stack.Title>Профиль</Stack.Title>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
         <ScrollView
@@ -84,17 +102,25 @@ export default function ProfileScreen() {
           <ProfileField label="ФИО" value={name} onChangeText={setName} />
           <ProfileField label="Телефон" value={phone} onChangeText={setPhone} />
           <ProfileField label="Организация" value={organization} onChangeText={setOrganization} />
-          {saved ? (
+          {notice ? (
             <View
               style={{
                 padding: 13,
                 borderRadius: 13,
                 borderCurve: "continuous",
-                backgroundColor: colors.primaryContainer,
+                borderWidth: notice.error ? 1 : 0,
+                borderColor: notice.error ? colors.error : "transparent",
+                backgroundColor: notice.error ? `${colors.error}18` : colors.primaryContainer,
               }}
             >
-              <Text selectable style={{ color: "#003733", fontWeight: "700" }}>
-                Профиль сохранён.
+              <Text
+                selectable
+                style={{
+                  color: notice.error ? colors.error : "#003733",
+                  fontWeight: "700",
+                }}
+              >
+                {notice.text}
               </Text>
             </View>
           ) : null}
