@@ -1,6 +1,6 @@
 ﻿from __future__ import annotations
 
-import shutil
+import re
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -44,6 +44,16 @@ ALLOWED_EXTENSIONS = {
     ".ppt",
     ".pptx",
 }
+ALLOWED_MIME_TYPES = {
+    "application/octet-stream",
+    "application/pdf",
+    "application/msword",
+    "application/vnd.ms-excel",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+}
 
 
 @asynccontextmanager
@@ -52,7 +62,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="АвтоДоговор", version="1.0.4", lifespan=lifespan)
+app = FastAPI(title="АвтоДоговор", version="1.0.5", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 if MOBILE_ASSET_DIR.exists():
     app.mount("/pwa-assets", StaticFiles(directory=MOBILE_ASSET_DIR), name="pwa-assets")
@@ -75,6 +85,14 @@ class DealPayload(BaseModel):
     data: dict[str, Any]
 
 
+class GeneratedFileRename(BaseModel):
+    name: str
+
+
+MAX_UPLOAD_BYTES = 30 * 1024 * 1024
+INVALID_FILE_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
 def _notes_by_group(notes: list[str]) -> dict[str, str]:
     groups = {"seller": [], "buyer": [], "vehicle": []}
     for note in notes:
@@ -92,6 +110,20 @@ def _recognition_group(document_type: str) -> str:
     if document_type in {"vehicle_docs", "pts", "sts"}:
         return "vehicle_docs"
     return document_type
+
+
+def _friendly_ocr_error(error: Exception) -> str:
+    text = str(error).strip()
+    lowered = text.lower()
+    if any(marker in lowered for marker in ("urlopen error", "timed out", "timeout", "winerror 10013")):
+        return "нет соединения с OpenRouter. Проверьте интернет и повторите"
+    if any(marker in lowered for marker in ("401", "unauthorized", "api key")):
+        return "ключ OpenRouter недействителен или не настроен"
+    if any(marker in lowered for marker in ("402", "insufficient", "credit")):
+        return "на балансе OpenRouter недостаточно средств"
+    if "429" in lowered or "rate limit" in lowered:
+        return "OpenRouter временно ограничил число запросов. Повторите позже"
+    return text or "неизвестная ошибка сервиса"
 
 
 def _fields_for_document(document_type: str, fields: dict[str, Any]) -> dict[str, Any]:
@@ -221,11 +253,23 @@ async def upload_document(
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
         raise HTTPException(400, "Формат файла не поддерживается")
+    content_type = str(file.content_type or "").lower()
+    if content_type and not content_type.startswith("image/") and content_type not in ALLOWED_MIME_TYPES:
+        raise HTTPException(400, "Тип содержимого файла не поддерживается")
 
     folder = database.documents_dir(deal_id)
     stored = folder / f"{uuid.uuid4().hex}{suffix}"
-    with stored.open("wb") as destination:
-        shutil.copyfileobj(file.file, destination)
+    written = 0
+    try:
+        with stored.open("wb") as destination:
+            while chunk := await file.read(1024 * 1024):
+                written += len(chunk)
+                if written > MAX_UPLOAD_BYTES:
+                    raise HTTPException(413, "Файл больше 30 МБ")
+                destination.write(chunk)
+    except Exception:
+        stored.unlink(missing_ok=True)
+        raise
     _normalize_uploaded_orientation(stored)
     if defer_ocr:
         result = {
@@ -266,7 +310,7 @@ async def upload_document(
                 "field_meta": {},
                 "conflicts": {},
                 "text": "",
-                "note": f"Файл сохранён, но OpenRouter не выполнил распознавание: {exc}",
+                "note": f"Файл сохранён, но OpenRouter не выполнил распознавание: {_friendly_ocr_error(exc)}",
                 "detected_type": document_type,
                 "effective_type": document_type,
                 "pages": 1,
@@ -356,6 +400,7 @@ async def reprocess_documents(deal_id: int, section: str = "all") -> dict[str, A
     combined_meta: dict[str, dict[str, Any]] = {}
     combined_conflicts: dict[str, list[dict[str, Any]]] = {}
     notes: list[str] = []
+    errors: list[dict[str, str]] = []
     processed = 0
     grouped: dict[str, list[dict[str, Any]]] = {}
     allowed_document_types = {
@@ -387,13 +432,17 @@ async def reprocess_documents(deal_id: int, section: str = "all") -> dict[str, A
             if Path(document["stored_path"]).exists() and openrouter_can_process(Path(document["stored_path"]))
         ]
         if not ocr_documents:
-            notes.append(f"{document_type}: нет файлов подходящих для OpenRouter OCR.")
+            message = f"{document_type}: загруженные файлы не поддерживаются распознаванием."
+            notes.append(message)
+            errors.append({"group": document_type, "code": "unsupported_format", "message": message})
             continue
         paths = [Path(document["stored_path"]) for document in ocr_documents]
         try:
             result = await run_in_threadpool(hybrid_recognize_files, paths, document_type)
         except RuntimeError as exc:
-            notes.append(f"{document_type}: OpenRouter не выполнил распознавание: {exc}")
+            message = f"{document_type}: {_friendly_ocr_error(exc)}"
+            notes.append(message)
+            errors.append({"group": document_type, "code": "ocr_service_error", "message": message})
             continue
         combined_fields.update(result.get("fields", {}))
         combined_meta.update(result.get("field_meta", {}))
@@ -413,6 +462,9 @@ async def reprocess_documents(deal_id: int, section: str = "all") -> dict[str, A
     _persist_recognized_fields(deal_id, fields)
     return {
         "processed": processed,
+        "status": "ok" if processed and not errors else "partial" if processed else "failed",
+        "failed_groups": len(errors),
+        "errors": errors,
         "fields": fields,
         "field_meta": {key: value for key, value in combined_meta.items() if key in fields},
         "conflicts": combined_conflicts,
@@ -462,7 +514,7 @@ async def reprocess_single_field(deal_id: int, field_name: str) -> dict[str, Any
             [field_name],
         )
     except RuntimeError as exc:
-        raise HTTPException(502, f"OpenRouter не выполнил распознавание: {exc}") from exc
+        raise HTTPException(502, f"OpenRouter не выполнил распознавание: {_friendly_ocr_error(exc)}") from exc
 
     fields = normalize_fields(result.get("fields", {}))
     fields = {field_name: fields[field_name]} if fields.get(field_name) else {}
@@ -494,7 +546,7 @@ def make_contract(deal_id: int) -> dict[str, Any]:
     except Exception as exc:
         raise HTTPException(500, f"Не удалось создать готовые файлы: {exc}") from exc
     return {
-        "template": "MyFiles/BAZA.xls",
+        "template": "MyFiles/BAZA.xlsx",
         "files": [_generated_file_payload(item) for item in stored_files],
     }
 
@@ -538,6 +590,24 @@ def download_ready_file(deal_id: int, file_id: int, inline: bool = False) -> Fil
         media_type=item["media_type"],
         headers=headers,
     )
+
+
+@app.patch("/api/deals/{deal_id}/files/{file_id}")
+def rename_ready_file(deal_id: int, file_id: int, payload: GeneratedFileRename) -> dict[str, Any]:
+    requested = payload.name.strip()
+    if not requested or len(requested) > 120 or INVALID_FILE_NAME.search(requested):
+        raise HTTPException(400, "Недопустимое имя файла")
+    try:
+        item = database.rename_generated_file(deal_id, file_id, requested)
+    except FileExistsError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(500, "Не удалось переименовать файл") from exc
+    if not item:
+        raise HTTPException(404, "Готовый файл не найден")
+    return _generated_file_payload(item)
 
 
 @app.get("/api/contracts/{filename}")

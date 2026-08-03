@@ -40,7 +40,11 @@ export function AppMenuButton() {
           backgroundColor: pressed ? colors.surfaceVariant : "transparent",
         })}
       >
-        <Text style={{ color: colors.text, fontSize: 26, lineHeight: 30 }}>☰</Text>
+        <View style={{ width: 20, gap: 4 }}>
+          <View style={{ height: 2, borderRadius: 2, backgroundColor: colors.text }} />
+          <View style={{ height: 2, borderRadius: 2, backgroundColor: colors.text }} />
+          <View style={{ height: 2, borderRadius: 2, backgroundColor: colors.text }} />
+        </View>
       </Pressable>
 
       <Modal
@@ -66,7 +70,7 @@ export function AppMenuButton() {
                 <Text style={{ color: colors.text, fontSize: 24, fontWeight: "800" }}>
                   АвтоДоговор
                 </Text>
-                <Text style={{ color: colors.muted, fontSize: 13 }}>Версия 1.0.1</Text>
+                <Text style={{ color: colors.muted, fontSize: 13 }}>Версия 1.0.5.1</Text>
               </View>
               {menuItems.map((item) => (
                 <Pressable

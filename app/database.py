@@ -509,6 +509,41 @@ def get_generated_file(deal_id: int, file_id: int) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
+def rename_generated_file(deal_id: int, file_id: int, new_name: str) -> dict[str, Any] | None:
+    """Atomically rename a generated file inside its deal directory."""
+    item = get_generated_file(deal_id, file_id)
+    if not item:
+        return None
+    source = Path(item["stored_path"])
+    folder = generated_dir(deal_id).resolve()
+    try:
+        resolved_source = source.resolve()
+    except OSError as exc:
+        raise ValueError("Не удалось проверить путь готового файла") from exc
+    if folder not in resolved_source.parents or not resolved_source.is_file():
+        raise ValueError("Готовый файл находится вне папки ДКП")
+
+    safe_name = Path(new_name).name.strip()
+    if safe_name != new_name.strip() or not safe_name:
+        raise ValueError("Укажите только имя файла")
+    if Path(safe_name).suffix.lower() != source.suffix.lower():
+        raise ValueError("Расширение готового файла изменять нельзя")
+    target = (folder / safe_name).resolve()
+    if folder not in target.parents:
+        raise ValueError("Недопустимый путь файла")
+    if target != resolved_source and target.exists():
+        raise FileExistsError("Файл с таким именем уже существует")
+
+    if target != resolved_source:
+        resolved_source.rename(target)
+    with connection() as conn:
+        conn.execute(
+            "UPDATE generated_files SET name=?, stored_path=? WHERE id=? AND deal_id=?",
+            (safe_name, str(target), file_id, deal_id),
+        )
+    return get_generated_file(deal_id, file_id)
+
+
 def delete_document(document_id: int) -> bool:
     with connection() as conn:
         row = conn.execute("SELECT stored_path FROM documents WHERE id=?", (document_id,)).fetchone()

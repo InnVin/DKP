@@ -8,11 +8,11 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="АвтоДоговор">
-  <title>АвтоДоговор 1.0.4</title>
+  <title>АвтоДоговор 1.0.5</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" type="image/png" sizes="192x192" href="/pwa-assets/pwa-icon-192.png">
   <link rel="apple-touch-icon" href="/pwa-assets/pwa-icon-192.png">
-  <link rel="stylesheet" href="/static/styles.css?v=104">
+  <link rel="stylesheet" href="/static/styles.css?v=105">
 </head>
 <body>
   <header class="app-header">
@@ -21,7 +21,15 @@
       <strong>АвтоДоговор</strong>
       <span id="dealBadge">Новая ДКП</span>
     </div>
-    <button id="saveDeal" class="header-action" type="button">Сохранить</button>
+    <div class="header-tools">
+      <label class="theme-switch" title="Сменить тему">
+        <span aria-hidden="true">☀</span>
+        <input id="themeToggle" type="checkbox" role="switch" aria-label="Тёмная тема">
+        <i aria-hidden="true"></i>
+        <span aria-hidden="true">☾</span>
+      </label>
+      <button id="saveDeal" class="header-action" type="button">Сохранить</button>
+    </div>
   </header>
 
   <main class="app-main">
@@ -227,7 +235,7 @@
         </section>
         <section class="review-card">
           <div class="review-card-heading">
-            <div><h2>Готовые файлы</h2><p>Шаблон: MyFiles\BAZA.xls</p></div>
+            <div><h2>Готовые файлы</h2><p>Шаблон: MyFiles\BAZA.xlsx</p></div>
             <button id="makeContract" class="button primary" type="button">Создать</button>
           </div>
           <div id="readyFiles" class="ready-files"><p class="empty-state">Файлы ещё не созданы.</p></div>
@@ -245,15 +253,7 @@
     </section>
 
     <section id="settingsView" class="app-view" data-app-view="settings">
-      <div class="view-heading"><div><span class="eyebrow">Настройки</span><h1>Внешний вид</h1></div></div>
-      <section class="settings-card">
-        <h2>Тема</h2>
-        <div class="theme-options" role="group" aria-label="Тема приложения">
-          <button type="button" data-theme-choice="system">Системная</button>
-          <button type="button" data-theme-choice="light">Светлая</button>
-          <button type="button" data-theme-choice="dark">Тёмная</button>
-        </div>
-      </section>
+      <div class="view-heading"><div><span class="eyebrow">Настройки</span><h1>Распознавание</h1></div></div>
       <section class="settings-card">
         <h2>Распознавание</h2>
         <p id="ocrSettingsStatus">Проверяем подключение OpenRouter…</p>
@@ -266,13 +266,12 @@
     <button class="menu-sheet-backdrop" type="button" data-close-menu aria-label="Закрыть меню"></button>
     <aside class="menu-sheet-panel">
       <div class="menu-sheet-heading">
-        <div><strong>АвтоДоговор</strong><span id="webVersionLabel">Web/PWA 1.0.4</span></div>
+        <div><strong>АвтоДоговор</strong><span id="webVersionLabel">Web/PWA 1.0.5</span></div>
         <button class="menu-sheet-close" type="button" data-close-menu aria-label="Закрыть меню">×</button>
       </div>
       <button id="topNewDeal" type="button" data-app-action="new">Новая ДКП</button>
-      <button type="button" data-app-action="archive">Архив</button>
       <button type="button" data-app-action="files">Файлы текущей ДКП</button>
-      <button type="button" data-app-action="settings">Настройки и тема</button>
+      <button type="button" data-app-action="settings">Настройки распознавания</button>
       <button type="button" data-app-action="install">Установить PWA</button>
     </aside>
   </section>
@@ -291,7 +290,7 @@
   <div id="message" class="message hidden" role="status" aria-live="polite"></div>
   <nav class="bottom-navigation" aria-label="Основные разделы"></nav>
 
-  <script src="/static/ui-config.js?v=104"></script>
-  <script src="/static/pwa.js?v=104"></script>
+  <script src="/static/ui-config.js?v=105"></script>
+  <script src="/static/pwa.js?v=105"></script>
 </body>
 </html>

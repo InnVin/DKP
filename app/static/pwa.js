@@ -19,6 +19,9 @@ const state = {
   trashOpen: false,
   deleteConfirmId: null,
   trashDeleteConfirmId: null,
+  expandedArchiveIds: new Set(),
+  fileSheetDealId: null,
+  fileSheetFiles: [],
   pendingDocumentDeletes: new Map(),
   backArmedUntil: 0,
 };
@@ -279,13 +282,17 @@ function setAppMenu(open) {
   document.body.style.overflow = open ? "hidden" : "";
 }
 
-function applyTheme(choice) {
-  const selected = ["system", "light", "dark"].includes(choice) ? choice : "system";
-  localStorage.setItem("autodogovor-theme", selected);
-  const dark = selected === "dark" || (selected === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+function applyTheme(choice, persist = true) {
+  const selected = choice === "dark" ? "dark" : "light";
+  if (persist) localStorage.setItem("autodogovor-theme", selected);
+  const dark = selected === "dark";
   document.documentElement.dataset.theme = dark ? "dark" : "light";
   document.querySelector('meta[name="theme-color"]').content = dark ? "#182023" : "#0f7470";
-  document.querySelectorAll("[data-theme-choice]").forEach(button => button.classList.toggle("active", button.dataset.themeChoice === selected));
+  const toggle = document.querySelector("#themeToggle");
+  if (toggle) {
+    toggle.checked = dark;
+    toggle.setAttribute("aria-checked", String(dark));
+  }
 }
 
 async function saveDeal(silent = false) {
@@ -340,27 +347,62 @@ async function loadArchive(query = "") {
   state.archive = await api(`/api/deals?q=${encodeURIComponent(query || "")}`);
   const numbers = state.archive.map(row => Number(row.contract_number || row.id)).filter(Number.isFinite);
   state.nextContractNumber = Math.max(0, ...numbers) + 1;
-  document.querySelector("#archiveList").innerHTML = state.archive.map(row => `
-    <article class="archive-item ${Number(row.id) === Number(state.dealId) ? "active" : ""}" data-id="${row.id}">
+  document.querySelector("#archiveList").innerHTML = state.archive.map(row => {
+    const expanded = state.expandedArchiveIds.has(Number(row.id));
+    return `
+    <article class="archive-item ${Number(row.id) === Number(state.dealId) ? "active" : ""} ${expanded ? "expanded" : ""}" data-id="${row.id}">
       <div class="archive-head"><span class="archive-number">№${escapeHtml(row.contract_number || row.id)} · ${escapeHtml(row.contract_date || "")}</span>${archiveBadge(row)}</div>
       <strong class="archive-person">${escapeHtml(row.seller_full_name || "Продавец не указан")}</strong>
       <span>${escapeHtml(row.vehicle_make_model || "Автомобиль не указан")}</span>
       <span>${escapeHtml([row.registration_plate, row.vin].filter(Boolean).join(" · ") || "Номера не указаны")}</span>
       <span>${Number(row.document_count || 0)} фото · ${Number(row.generated_count || 0)} файла</span>
-      ${state.deleteConfirmId === row.id
-        ? `<div class="archive-confirm"><button class="cancel-delete" type="button" data-cancel-delete>×</button><button class="confirm-delete" type="button" data-confirm-delete="${row.id}">✓</button></div>`
-        : `<button class="icon-delete archive-delete" type="button" data-delete-deal="${row.id}" aria-label="Переместить ДКП в корзину"><span class="trash-symbol"></span></button>`}
-    </article>
-  `).join("") || `<p class="empty-state">Архив пока пуст.</p>`;
+      <div class="archive-tools">
+        <button class="archive-tool" type="button" data-archive-files="${row.id}" aria-label="Отправить или сохранить файлы">Файлы</button>
+        ${state.deleteConfirmId === row.id
+          ? `<div class="archive-confirm"><button class="cancel-delete" type="button" data-cancel-delete aria-label="Отмена">×</button><button class="confirm-delete" type="button" data-confirm-delete="${row.id}" aria-label="Подтвердить удаление">✓</button></div>`
+          : `<button class="icon-delete archive-delete" type="button" data-delete-deal="${row.id}" aria-label="Переместить ДКП в корзину"><span class="trash-symbol"></span></button>`}
+        <button class="archive-toggle" type="button" data-toggle-archive="${row.id}" aria-expanded="${expanded}" aria-label="${expanded ? "Скрыть" : "Показать"} данные ДКП"></button>
+      </div>
+      <div class="archive-details" aria-hidden="${!expanded}"><div class="archive-details-inner">
+        ${renderArchiveDetails(row)}
+        <div class="archive-footer"><button class="button primary archive-open" type="button" data-open-deal="${row.id}">Перейти</button></div>
+      </div></div>
+    </article>`;
+  }).join("") || `<p class="empty-state">Архив пока пуст.</p>`;
   await loadTrash();
+}
+
+function renderArchiveDetails(row) {
+  const groups = [
+    ["Договор", [["Номер", "contract_number"], ["Дата", "contract_date"], ["Место", "contract_place"], ["Стоимость", "price"]]],
+    ["Продавец", [["ФИО", "seller_full_name"], ["Дата рождения", "seller_birth_date"], ["Телефон", "seller_phone"], ["Паспорт", "seller_passport"], ["Дата выдачи", "seller_passport_issue_date"], ["Кем выдан", "seller_passport_issued_by"], ["Адрес", "seller_address"]]],
+    ["Покупатель", [["ФИО", "buyer_full_name"], ["Дата рождения", "buyer_birth_date"], ["Телефон", "buyer_phone"], ["Паспорт", "buyer_passport"], ["Дата выдачи", "buyer_passport_issue_date"], ["Кем выдан", "buyer_passport_issued_by"], ["Адрес", "buyer_address"]]],
+    ["Автомобиль", [["Марка и модель", "vehicle_make_model"], ["Категория", "vehicle_type"], ["Год", "vehicle_year"], ["VIN", "vin"], ["Кузов", "body_number"], ["Шасси", "chassis_number"], ["Цвет", "color"], ["Госномер", "registration_plate"], ["ПТС", "pts_series_number"], ["СТС", "sts_series_number"]]],
+  ];
+  return groups.map(([title, fields]) => `<section class="archive-data-group"><b>${title}</b>${fields.map(([label, key]) => `<div class="archive-data-row"><span>${label}</span><span>${escapeHtml(row[key] || "—")}</span></div>`).join("")}</section>`).join("");
+}
+
+async function openArchiveFiles(id) {
+  const deal = await api(`/api/deals/${id}`);
+  let files = deal.generated_files || [];
+  if (!files.length) {
+    const result = await api(`/api/deals/${id}/contract`, { method: "POST" });
+    files = result.files || [];
+    await loadArchive(document.querySelector("#archiveSearch").value);
+  }
+  openFileSheet(null, files, Number(id));
 }
 
 async function loadTrash() {
   state.deleted = await api("/api/deals-trash");
   const panel = document.querySelector("#trashPanel");
   panel.innerHTML = `
-    <button class="trash-toggle" type="button" data-trash-toggle aria-expanded="${state.trashOpen}">Корзина · ${state.deleted.length}</button>
-    <div class="trash-list ${state.trashOpen ? "" : "hidden"}">
+    <button class="trash-toggle" type="button" data-trash-toggle aria-expanded="${state.trashOpen}">
+      <svg class="trash-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 10v6M14 10v6"/></svg>
+      <span>Корзина · ${state.deleted.length}</span>
+      <svg class="trash-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+    </button>
+    <div class="trash-list-wrap ${state.trashOpen ? "expanded" : ""}"><div class="trash-list">
       ${state.deleted.map(row => `
         <article class="trash-item">
           <strong>№${escapeHtml(row.contract_number || row.id)} · ${escapeHtml(row.seller_full_name || "Без продавца")}</strong>
@@ -373,7 +415,7 @@ async function loadTrash() {
           </div>
         </article>
       `).join("") || `<p class="empty-state">Корзина пуста.</p>`}
-    </div>`;
+    </div></div>`;
 }
 
 function statusLabel(status) {
@@ -517,7 +559,14 @@ async function recognize(section = "all") {
     updateReadiness();
     await saveDeal(true);
     finishRecognitionProgress(false);
-    showMessage(result.processed ? "Распознавание завершено" : "Подходящих фото для распознавания нет", !result.processed);
+    const firstError = result.errors?.[0]?.message || result.notes;
+    if (!result.processed) {
+      showMessage(firstError || "Сервис не смог распознать загруженные фотографии", true, null, 6500);
+    } else if (result.status === "partial") {
+      showMessage(`Обработано документов: ${result.processed}. ${firstError || "Часть фотографий не распознана."}`, true, null, 6500);
+    } else {
+      showMessage(`Распознавание завершено. Обработано документов: ${result.processed}.`);
+    }
   } catch (error) {
     finishRecognitionProgress(true);
     showMessage(error.message, true);
@@ -565,8 +614,8 @@ async function makeContract() {
     const result = await api(`/api/deals/${state.dealId}/contract`, { method: "POST" });
     state.generatedFiles = result.files || [];
     renderReadyFiles();
-    showMessage("XLS, PDF и JPG готовы");
-    openFileSheet();
+    showMessage("XLSX, PDF и JPG готовы");
+    openFileSheet(null, state.generatedFiles, Number(state.dealId));
     await loadArchive();
   } finally {
     button.disabled = false;
@@ -574,16 +623,21 @@ async function makeContract() {
   }
 }
 
-function openFileSheet(fileId = null) {
-  if (!state.generatedFiles.length) {
+function openFileSheet(fileId = null, sourceFiles = state.generatedFiles, dealId = state.dealId) {
+  if (!sourceFiles.length) {
     setDealTab("review");
     return showMessage("Сначала создайте готовые файлы");
   }
-  const files = fileId ? state.generatedFiles.filter(file => Number(file.id) === Number(fileId)) : state.generatedFiles;
+  state.fileSheetDealId = Number(dealId);
+  state.fileSheetFiles = sourceFiles;
+  const files = fileId ? sourceFiles.filter(file => Number(file.id) === Number(fileId)) : sourceFiles;
   document.querySelector("#readyFileOptions").innerHTML = files.map(file => `
     <div class="file-option">
       <b>${escapeHtml(file.kind.toUpperCase())}</b>
-      <span>${escapeHtml(file.name)}</span>
+      <div class="file-name-edit">
+        <input type="text" value="${escapeHtml(file.name)}" data-file-name="${file.id}" maxlength="120" aria-label="Название файла ${escapeHtml(file.kind.toUpperCase())}">
+        <button type="button" data-rename-file="${file.id}">Сохранить имя</button>
+      </div>
       <div class="file-option-actions">
         <button type="button" data-share-file="${file.id}">Отправить</button>
         <a href="${file.download_url}" download>Скачать</a>
@@ -600,7 +654,7 @@ function closeFileSheet() {
 }
 
 async function shareFile(id) {
-  const file = state.generatedFiles.find(item => Number(item.id) === Number(id));
+  const file = state.fileSheetFiles.find(item => Number(item.id) === Number(id));
   if (!file) return;
   try {
     const response = await fetch(file.download_url);
@@ -618,6 +672,23 @@ async function shareFile(id) {
   link.download = file.name;
   link.click();
   showMessage("Системная отправка недоступна — файл скачан");
+}
+
+async function renameReadyFile(id) {
+  const input = document.querySelector(`[data-file-name="${id}"]`);
+  if (!input) return;
+  const file = await api(`/api/deals/${state.fileSheetDealId}/files/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: input.value.trim() }),
+  });
+  state.fileSheetFiles = state.fileSheetFiles.map(item => Number(item.id) === Number(id) ? file : item);
+  if (Number(state.fileSheetDealId) === Number(state.dealId)) {
+    state.generatedFiles = state.generatedFiles.map(item => Number(item.id) === Number(id) ? file : item);
+    renderReadyFiles();
+  }
+  openFileSheet(null, state.fileSheetFiles, state.fileSheetDealId);
+  showMessage("Название файла сохранено");
 }
 
 function syncButtons() {
@@ -699,6 +770,17 @@ document.querySelector("#uploadGrid").addEventListener("click", event => {
 });
 document.querySelector("#archiveSearch").addEventListener("input", event => loadArchive(event.target.value).catch(error => showMessage(error.message, true)));
 document.querySelector("#archiveList").addEventListener("click", event => {
+  const toggle = event.target.closest("[data-toggle-archive]");
+  if (toggle) {
+    const id = Number(toggle.dataset.toggleArchive);
+    if (state.expandedArchiveIds.has(id)) state.expandedArchiveIds.delete(id);
+    else state.expandedArchiveIds.add(id);
+    return loadArchive(document.querySelector("#archiveSearch").value);
+  }
+  const filesButton = event.target.closest("[data-archive-files]");
+  if (filesButton) return openArchiveFiles(filesButton.dataset.archiveFiles).catch(error => showMessage(error.message, true));
+  const openButton = event.target.closest("[data-open-deal]");
+  if (openButton) return openDeal(openButton.dataset.openDeal).catch(error => showMessage(error.message, true));
   const deleteButton = event.target.closest("[data-delete-deal]");
   if (deleteButton) {
     event.stopPropagation();
@@ -725,8 +807,6 @@ document.querySelector("#archiveList").addEventListener("click", event => {
     }).catch(error => showMessage(error.message, true));
     return;
   }
-  const item = event.target.closest(".archive-item");
-  if (item) openDeal(item.dataset.id).catch(error => showMessage(error.message, true));
 });
 document.querySelector("#trashPanel").addEventListener("click", event => {
   if (event.target.closest("[data-trash-toggle]")) {
@@ -767,16 +847,15 @@ document.querySelector("#fileActionSheet").addEventListener("click", event => {
   if (event.target.closest("[data-close-files]")) return closeFileSheet();
   const share = event.target.closest("[data-share-file]");
   if (share) shareFile(share.dataset.shareFile);
+  const rename = event.target.closest("[data-rename-file]");
+  if (rename) renameReadyFile(rename.dataset.renameFile).catch(error => showMessage(error.message, true));
   const print = event.target.closest("[data-print-file]");
   if (print) {
-    const file = state.generatedFiles.find(item => Number(item.id) === Number(print.dataset.printFile));
+    const file = state.fileSheetFiles.find(item => Number(item.id) === Number(print.dataset.printFile));
     if (file) window.open(`${file.download_url}?inline=1`, "_blank", "noopener");
   }
 });
-document.querySelector(".theme-options").addEventListener("click", event => {
-  const button = event.target.closest("[data-theme-choice]");
-  if (button) applyTheme(button.dataset.themeChoice);
-});
+document.querySelector("#themeToggle").addEventListener("change", event => applyTheme(event.target.checked ? "dark" : "light"));
 form.addEventListener("input", updateReadiness);
 form.addEventListener("change", event => {
   if (event.target.name) event.target.value = normalizeField(event.target.name, event.target.value);
@@ -842,8 +921,8 @@ window.addEventListener("appinstalled", () => {
   installButton.classList.add("hidden");
   showMessage("PWA установлено");
 });
-matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
-  if ((localStorage.getItem("autodogovor-theme") || "system") === "system") applyTheme("system");
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", event => {
+  if (!localStorage.getItem("autodogovor-theme")) applyTheme(event.matches ? "dark" : "light", false);
 });
 
 if ("serviceWorker" in navigator && (window.isSecureContext || location.hostname === "localhost" || location.hostname === "127.0.0.1")) {
@@ -851,6 +930,7 @@ if ("serviceWorker" in navigator && (window.isSecureContext || location.hostname
 }
 
 renderNavigation();
-applyTheme(localStorage.getItem("autodogovor-theme") || "system");
+const savedTheme = localStorage.getItem("autodogovor-theme");
+applyTheme(savedTheme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"), Boolean(savedTheme));
 setDealTab("documents");
 loadArchive().then(newDeal).catch(error => showMessage(error.message, true));

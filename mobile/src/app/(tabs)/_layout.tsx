@@ -1,8 +1,11 @@
 import { NativeTabs } from "expo-router/unstable-native-tabs";
 
+import { useAppColors } from "@/theme/use-app-colors";
+
 export default function TabsLayout() {
+  const colors = useAppColors();
   return (
-    <NativeTabs labelVisibilityMode="labeled">
+    <NativeTabs labelVisibilityMode="labeled" tintColor={colors.primary}>
       <NativeTabs.Trigger name="archive">
         <NativeTabs.Trigger.Icon sf="archivebox" md="inventory_2" />
         <NativeTabs.Trigger.Label>Архив</NativeTabs.Trigger.Label>

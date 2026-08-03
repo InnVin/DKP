@@ -192,6 +192,38 @@ export default function SettingsScreen() {
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ padding: 16, paddingBottom: 120, gap: 22 }}
         >
+          <View style={{ gap: 12 }}>
+            <Text style={{ color: colors.text, fontSize: 20, fontWeight: "800" }}>Разделы</Text>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+              <AppButton
+                title="Профиль"
+                variant="outlined"
+                onPress={() => router.navigate("/settings/profile")}
+                style={{ flex: 1, minWidth: 130 }}
+              />
+              <AppButton
+                title="Файлы"
+                variant="outlined"
+                onPress={() => router.navigate("/archive/files")}
+                style={{ flex: 1, minWidth: 130 }}
+              />
+              <AppButton
+                title="Админка"
+                variant="outlined"
+                onPress={() => router.navigate("/settings/admin")}
+                style={{ flex: 1, minWidth: 130 }}
+              />
+              <AppButton
+                title="Веб-версия"
+                variant="outlined"
+                onPress={() => router.navigate("/hybrid")}
+                style={{ flex: 1, minWidth: 130 }}
+              />
+            </View>
+          </View>
+
+          <View style={{ height: 1, backgroundColor: colors.outline }} />
+
           <View style={{ gap: 14 }}>
             <Text style={{ color: colors.text, fontSize: 20, fontWeight: "800" }}>Распознавание</Text>
             <SettingField

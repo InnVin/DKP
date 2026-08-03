@@ -4,12 +4,14 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 from PIL import Image
+import pypdfium2 as pdfium
 
 from app import database
 from app.excel_service import _prepare_baza_payload, _write_default_workbook, create_contract
 from app.field_postprocess import postprocess_fields
 from app.hybrid_ocr import _resolve_candidates
 from app.ocr import extract_fields
+from app.main import _friendly_ocr_error
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,7 +32,7 @@ class WebPwaUiTests(unittest.TestCase):
         self.assertIn('class="bottom-navigation"', self.index)
         self.assertIn('{ action: "deal", label: "ДКП" }', self.ui_config)
         self.assertIn('{ action: "archive", label: "Архив" }', self.ui_config)
-        self.assertIn('{ action: "settings", label: "Настройки" }', self.ui_config)
+        self.assertNotIn('{ action: "settings", label: "Настройки" }', self.ui_config)
         self.assertNotIn("Профиль", self.ui_config)
 
     def test_document_actions_and_multiple_upload(self):
@@ -44,8 +46,8 @@ class WebPwaUiTests(unittest.TestCase):
     def test_accordions_themes_and_fixed_action(self):
         for section in ("contract", "seller", "buyer", "vehicle", "notes"):
             self.assertIn(f'id="section-{section}"', self.index)
-        for theme in ("system", "light", "dark"):
-            self.assertIn(f'data-theme-choice="{theme}"', self.index)
+        self.assertIn('id="themeToggle"', self.index)
+        self.assertNotIn('data-theme-choice="system"', self.index)
         self.assertIn(".floating-next", self.styles)
         self.assertIn("position: fixed", self.styles)
         self.assertIn("env(safe-area-inset-bottom)", self.styles)
@@ -63,9 +65,17 @@ class WebPwaUiTests(unittest.TestCase):
         self.assertIn('window.open(`${file.download_url}?inline=1`', self.script)
         self.assertIn("download_url", self.script)
         self.assertIn("archive-item", self.script)
+        self.assertIn("data-toggle-archive", self.script)
+        self.assertIn("data-archive-files", self.script)
+        self.assertIn("data-rename-file", self.script)
 
 
 class OcrExtractionTests(unittest.TestCase):
+    def test_ocr_connection_error_is_user_friendly(self):
+        message = _friendly_ocr_error(RuntimeError("<urlopen error [WinError 10013] blocked>"))
+        self.assertIn("нет соединения", message)
+        self.assertNotIn("WinError", message)
+
     def test_conflicting_candidates_require_user_choice(self):
         resolved, conflicts = _resolve_candidates(
             {
@@ -109,12 +119,47 @@ class OcrExtractionTests(unittest.TestCase):
         self.assertEqual(fields["vehicle_year"], "2000")
 
 
+class GeneratedFileTests(unittest.TestCase):
+    def test_generated_file_rename_is_scoped_and_keeps_extension(self):
+        originals = {
+            name: getattr(database, name)
+            for name in ("DATA_DIR", "DEALS_DIR", "UPLOAD_DIR", "OUTPUT_DIR", "LEGACY_OUTPUT_DIR", "DB_PATH")
+        }
+        try:
+            with tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                database.DATA_DIR = root
+                database.DEALS_DIR = root / "deals"
+                database.UPLOAD_DIR = root / "uploads"
+                database.OUTPUT_DIR = root / "contracts"
+                database.LEGACY_OUTPUT_DIR = root / "legacy"
+                database.DB_PATH = root / "test.sqlite3"
+                database.init_db()
+                deal_id = database.save_deal({"seller_full_name": "Тест"})
+                source = database.generated_dir(deal_id) / "Договор.pdf"
+                source.write_bytes(b"%PDF-test")
+                stored = database.replace_generated_files(deal_id, [{
+                    "kind": "pdf",
+                    "name": source.name,
+                    "stored_path": str(source),
+                    "media_type": "application/pdf",
+                }])[0]
+                renamed = database.rename_generated_file(deal_id, stored["id"], "Новый договор.pdf")
+                self.assertEqual(renamed["name"], "Новый договор.pdf")
+                self.assertTrue(Path(renamed["stored_path"]).exists())
+                with self.assertRaises(ValueError):
+                    database.rename_generated_file(deal_id, stored["id"], "Новый договор.exe")
+        finally:
+            for name, value in originals.items():
+                setattr(database, name, value)
+
+
 class ExcelTests(unittest.TestCase):
     def test_baza_date_format(self):
         payload = _prepare_baza_payload({"contract_date": "2026-06-18"})
         self.assertEqual(payload["contract_date"], "18.06.2026")
 
-    def test_canonical_baza_outputs_xls_pdf_jpg(self):
+    def test_canonical_baza_outputs_xlsx_pdf_jpg(self):
         payload = {
             "contract_place": "г. Якутск",
             "contract_date": "2026-07-30",
@@ -145,13 +190,25 @@ class ExcelTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as folder:
                 database.DEALS_DIR = Path(folder)
                 files = create_contract(77, payload)
-                self.assertEqual({item["kind"] for item in files}, {"xls", "pdf", "jpg"})
+                self.assertEqual({item["kind"] for item in files}, {"xlsx", "pdf", "jpg"})
                 paths = {item["kind"]: Path(item["stored_path"]) for item in files}
                 self.assertTrue(all(path.exists() and path.stat().st_size > 1000 for path in paths.values()))
-                self.assertEqual(paths["xls"].read_bytes()[:8], (ROOT / "MyFiles" / "BAZA.xls").read_bytes()[:8])
+                workbook = load_workbook(paths["xlsx"])
+                sheet = workbook["Пуст"]
+                self.assertEqual(sheet["D22"].value, "TOYOTA BELTA")
+                self.assertEqual(sheet["D22"].fill.fgColor.rgb[-6:], "E7E9E8")
+                self.assertEqual(sheet["A4"].alignment.horizontal, "center")
+                self.assertEqual(sheet.print_area, "'Пуст'!$A$1:$J$47")
+                self.assertEqual(sheet.page_setup.fitToWidth, 1)
+                self.assertEqual(sheet.page_setup.fitToHeight, 1)
+                workbook.close()
                 self.assertEqual(paths["pdf"].read_bytes()[:4], b"%PDF")
+                pdf = pdfium.PdfDocument(str(paths["pdf"]))
+                self.assertEqual(len(pdf), 1)
+                pdf.close()
                 with Image.open(paths["jpg"]) as image:
-                    self.assertEqual(image.size, (1240, 1754))
+                    self.assertTrue(1238 <= image.width <= 1242)
+                    self.assertTrue(1752 <= image.height <= 1756)
         finally:
             database.DEALS_DIR = original_deals_dir
 

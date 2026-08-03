@@ -4,13 +4,11 @@ import * as LocalAuthentication from "expo-local-authentication";
 import { Stack, useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   Alert,
   AppState,
   BackHandler,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   ScrollView,
   Text,
   TextInput,
@@ -28,7 +26,7 @@ import {
 import { secureSettings } from "@/lib/secure-settings";
 import { useAppColors } from "@/theme/use-app-colors";
 
-const HYBRID_VERSION = "1.0.3";
+const HYBRID_VERSION = "1.0.5.1";
 const BRIDGE_VERSION = 1;
 
 interface BridgeMessage {
@@ -49,9 +47,7 @@ export default function HybridScreen() {
   const [checking, setChecking] = useState(false);
   const [formError, setFormError] = useState("");
   const [webError, setWebError] = useState("");
-  const [pageLoading, setPageLoading] = useState(false);
   const [canGoBack, setCanGoBack] = useState(false);
-  const [bridgeReady, setBridgeReady] = useState(false);
 
   useEffect(() => {
     void secureSettings.getHybridServerUrl().then(savedUrl => {
@@ -120,7 +116,6 @@ export default function HybridScreen() {
       if (message.version !== BRIDGE_VERSION || typeof message.type !== "string") return;
 
       if (message.type === "bridge.ready") {
-        setBridgeReady(true);
         sendCapabilities(message.requestId);
         return;
       }
@@ -130,6 +125,18 @@ export default function HybridScreen() {
       }
       if (message.type === "settings.native") {
         router.push("/settings");
+        return;
+      }
+      if (message.type === "profile.native") {
+        router.push("/settings/profile");
+        return;
+      }
+      if (message.type === "files.native") {
+        router.push("/archive/files");
+        return;
+      }
+      if (message.type === "admin.native") {
+        router.push("/settings/admin");
         return;
       }
       if (message.type === "app.reload") {
@@ -153,7 +160,6 @@ export default function HybridScreen() {
     setServerUrl(normalizedUrl);
     setDraftUrl(normalizedUrl);
     setWebError("");
-    setBridgeReady(false);
     setEditingAddress(false);
   }, []);
 
@@ -164,7 +170,7 @@ export default function HybridScreen() {
     try {
       normalizedUrl = normalizeHybridServerUrl(draftUrl);
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 8000);
+      const timeout = setTimeout(() => controller.abort(), 20000);
       try {
         const response = await fetch(`${normalizedUrl}/api/health`, {
           headers: { Accept: "application/json" },
@@ -180,7 +186,7 @@ export default function HybridScreen() {
     } catch (error) {
       const message =
         error instanceof Error && error.name === "AbortError"
-          ? "Сервер не ответил за 8 секунд."
+          ? "Сервер не ответил за 20 секунд."
           : error instanceof Error
             ? error.message
             : "Не удалось проверить сервер.";
@@ -230,12 +236,12 @@ export default function HybridScreen() {
             >
               <View style={{ gap: 8 }}>
                 <Text style={{ color: colors.text, fontSize: 28, fontWeight: "800" }}>
-                  АвтоДоговор 1.0.3
+                  АвтоДоговор 1.0.5.1
                 </Text>
                 <Text selectable style={{ color: colors.muted, fontSize: 15, lineHeight: 22 }}>
                   Укажите адрес веб-приложения. Внешний сервер должен работать через HTTPS.
                   Для проверки в локальной сети разрешены адреса компьютера вида
-                  http://192.168.x.x:8000.
+                  http://192.168.x.x:8765.
                 </Text>
               </View>
 
@@ -302,46 +308,7 @@ export default function HybridScreen() {
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
-      <SafeAreaView edges={["top", "left", "right"]} style={{ flex: 1, backgroundColor: colors.surface }}>
-        <View
-          style={{
-            paddingHorizontal: 10,
-            paddingVertical: 7,
-            gap: 7,
-            borderBottomWidth: 1,
-            borderBottomColor: colors.outline,
-            backgroundColor: colors.surface,
-          }}
-        >
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <View
-              style={{
-                width: 9,
-                height: 9,
-                borderRadius: 5,
-                backgroundColor: webError ? colors.error : bridgeReady ? colors.success : colors.warning,
-              }}
-            />
-            <Text
-              numberOfLines={1}
-              style={{ flex: 1, minWidth: 0, color: colors.text, fontSize: 14, fontWeight: "700" }}
-            >
-              {webError ? "Сервер недоступен" : bridgeReady ? "АвтоДоговор онлайн" : "Подключение…"}
-            </Text>
-            {pageLoading ? <ActivityIndicator size="small" color={colors.primary} /> : null}
-          </View>
-          <View style={{ flexDirection: "row", gap: 7 }}>
-            <ToolbarButton
-              title="Назад"
-              disabled={!canGoBack}
-              onPress={() => webViewRef.current?.goBack()}
-            />
-            <ToolbarButton title="Обновить" onPress={() => webViewRef.current?.reload()} />
-            <ToolbarButton title="Адрес" onPress={() => setEditingAddress(true)} />
-            <ToolbarButton title="Офлайн" onPress={() => router.replace("/archive")} />
-          </View>
-        </View>
-
+      <SafeAreaView edges={["top", "bottom", "left", "right"]} style={{ flex: 1, backgroundColor: colors.surface }}>
         {webError ? (
           <View style={{ flex: 1, justifyContent: "center", padding: 22, gap: 14 }}>
             <Text style={{ color: colors.text, fontSize: 22, fontWeight: "800", textAlign: "center" }}>
@@ -354,7 +321,6 @@ export default function HybridScreen() {
               title="Повторить подключение"
               onPress={() => {
                 setWebError("");
-                setBridgeReady(false);
               }}
             />
             <AppButton title="Изменить адрес" variant="outlined" onPress={() => setEditingAddress(true)} />
@@ -391,14 +357,11 @@ export default function HybridScreen() {
               true;
             `}
             onMessage={event => void handleBridgeMessage(event)}
-            onLoadStart={() => setPageLoading(true)}
             onLoadEnd={() => {
-              setPageLoading(false);
               sendCapabilities();
             }}
             onNavigationStateChange={state => setCanGoBack(state.canGoBack)}
             onError={event => {
-              setPageLoading(false);
               setWebError(event.nativeEvent.description || "Проверьте адрес сервера и подключение.");
             }}
             onHttpError={event => {
@@ -427,45 +390,5 @@ export default function HybridScreen() {
         )}
       </SafeAreaView>
     </>
-  );
-}
-
-function ToolbarButton({
-  title,
-  onPress,
-  disabled = false,
-}: {
-  title: string;
-  onPress: () => void;
-  disabled?: boolean;
-}) {
-  const colors = useAppColors();
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={title}
-      disabled={disabled}
-      onPress={onPress}
-      style={({ pressed }) => ({
-        flex: 1,
-        minWidth: 0,
-        minHeight: 48,
-        paddingHorizontal: 5,
-        alignItems: "center",
-        justifyContent: "center",
-        borderRadius: 12,
-        borderCurve: "continuous",
-        backgroundColor: pressed ? colors.surfaceVariant : "transparent",
-        opacity: disabled ? 0.35 : 1,
-      })}
-    >
-      <Text
-        numberOfLines={2}
-        adjustsFontSizeToFit
-        style={{ color: colors.primary, fontSize: 13, fontWeight: "700", textAlign: "center" }}
-      >
-        {title}
-      </Text>
-    </Pressable>
   );
 }

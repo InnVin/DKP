@@ -17,7 +17,14 @@ export default function NewDealLayout() {
       }}
     >
       <Stack.Screen name="index" options={{ title: "Новый ДКП" }} />
-      <Stack.Screen name="deal/[id]" options={{ title: "ДКП" }} />
+      <Stack.Screen
+        name="deal/[id]"
+        options={{
+          title: "ДКП",
+          headerBackVisible: false,
+          headerLeft: () => <AppMenuButton />,
+        }}
+      />
     </Stack>
   );
 }

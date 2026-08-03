@@ -1,27 +1,68 @@
 from __future__ import annotations
 
 import re
+from copy import copy
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from openpyxl import Workbook
+import pypdfium2 as pdfium
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
-from PIL import Image, ImageDraw, ImageFont
-import xlrd
-from xlutils.copy import copy as copy_xls
+from PIL import Image
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfgen import canvas
 
 from . import database
 
+
 ROOT = database.ROOT
-TEMPLATE_PATH = ROOT / "MyFiles" / "BAZA.xls"
+TEMPLATE_PATH = ROOT / "MyFiles" / "BAZA.xlsx"
 FONT_REGULAR = Path(r"C:\Windows\Fonts\arial.ttf")
 FONT_BOLD = Path(r"C:\Windows\Fonts\arialbd.ttf")
+INPUT_FILL = PatternFill("solid", fgColor="E7E9E8")
+BLACK_SIDE = Side(style="thin", color="000000")
+
+CELL_MAP = {
+    "A4": "contract_place",
+    "J4": "contract_date",
+    "B9": "seller_full_name",
+    "D10": "seller_passport",
+    "H10": "seller_passport_issue_date",
+    "D11": "seller_passport_issued_by",
+    "D12": "seller_address",
+    "B15": "buyer_full_name",
+    "D16": "buyer_passport",
+    "H16": "buyer_passport_issue_date",
+    "D17": "buyer_passport_issued_by",
+    "D18": "buyer_address",
+    "D22": "vehicle_make_model",
+    "D23": "vehicle_type",
+    "D24": "vehicle_year",
+    "D25": "vin",
+    "D26": "body_number",
+    "D27": "chassis_number",
+    "D28": "color",
+    "D29": "pts_series_number",
+    "D30": "sts_series_number",
+    "D31": "registration_plate",
+    "D34": "price",
+    "G43": "seller_full_name",
+    "G46": "buyer_full_name",
+}
+
+INPUT_RANGES = (
+    "A4:C4", "J4", "B9:J9", "D10:F10", "H10:J10", "D11:J11", "D12:J12",
+    "B15:J15", "D16:F16", "H16:J16", "D17:J17", "D18:J18", "D22:J31",
+    "D34:F34", "D43:E43", "G43:J43", "D46:E46", "G46:J46",
+)
 
 
 def _safe_name(value: str) -> str:
-    value = re.sub(r'[<>:"/\\|?*]+', " ", value).strip()
+    value = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', " ", value).strip()
     return re.sub(r"\s+", "_", value)[:60] or "договор"
 
 
@@ -46,348 +87,234 @@ def _prepare_baza_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return prepared
 
 
-def _image_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
-    path = FONT_BOLD if bold else FONT_REGULAR
-    return ImageFont.truetype(str(path), size=size)
+def _style_input_ranges(sheet) -> None:
+    for address in INPUT_RANGES:
+        target = sheet[address]
+        if hasattr(target, "coordinate"):
+            target.fill = copy(INPUT_FILL)
+            continue
+        for row in target:
+            for cell in row:
+                cell.fill = copy(INPUT_FILL)
 
 
-def _wrap_text(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont, width: int) -> list[str]:
-    words = str(text or "").split()
-    if not words:
-        return [""]
-    lines: list[str] = []
-    line = words[0]
-    for word in words[1:]:
-        candidate = f"{line} {word}"
-        if draw.textlength(candidate, font=font) <= width:
-            line = candidate
-        else:
-            lines.append(line)
-            line = word
-    lines.append(line)
-    return lines
+def _configure_print(sheet) -> None:
+    sheet.sheet_view.showGridLines = False
+    sheet.print_area = "A1:J47"
+    sheet.page_setup.orientation = "portrait"
+    sheet.page_setup.paperSize = sheet.PAPERSIZE_A4
+    sheet.sheet_properties.pageSetUpPr.fitToPage = True
+    sheet.page_setup.fitToWidth = 1
+    sheet.page_setup.fitToHeight = 1
+    sheet.page_margins.left = 0.2
+    sheet.page_margins.right = 0.2
+    sheet.page_margins.top = 0.25
+    sheet.page_margins.bottom = 0.25
+    sheet.page_margins.header = 0
+    sheet.page_margins.footer = 0
+    sheet.print_options.horizontalCentered = True
 
 
-def _draw_wrapped(
-    draw: ImageDraw.ImageDraw,
-    text: str,
-    x: int,
-    y: int,
-    width: int,
-    font: ImageFont.FreeTypeFont,
-    *,
-    line_height: int,
-) -> int:
-    for line in _wrap_text(draw, text, font, width):
-        draw.text((x, y), line, fill="#111111", font=font)
-        y += line_height
-    return y
-
-
-def _render_contract_outputs(
-    pdf_path: Path,
-    jpg_path: Path,
-    payload: dict[str, Any],
-) -> None:
+def _fill_template(path: Path, payload: dict[str, Any]) -> None:
+    if not TEMPLATE_PATH.exists():
+        raise FileNotFoundError("Не найден шаблон MyFiles/BAZA.xlsx")
+    workbook = load_workbook(TEMPLATE_PATH)
+    sheet = workbook["Пуст"]
     data = _prepare_baza_payload(payload)
-    image = Image.new("RGB", (1240, 1754), "white")
-    draw = ImageDraw.Draw(image)
-    regular = _image_font(20)
-    small = _image_font(18)
-    bold = _image_font(20, bold=True)
-    title = _image_font(27, bold=True)
-    left, right = 72, 1168
-    width = right - left
-    y = 55
-
-    heading = "Д О Г О В О Р"
-    draw.text(((1240 - draw.textlength(heading, font=title)) / 2, y), heading, fill="#111111", font=title)
-    y += 36
-    subtitle = "КУПЛИ - ПРОДАЖИ ТРАНСПОРТНОГО СРЕДСТВА"
-    draw.text(((1240 - draw.textlength(subtitle, font=bold)) / 2, y), subtitle, fill="#111111", font=bold)
-    y += 48
-    draw.text((left, y), str(data.get("contract_place", "")), fill="#111111", font=regular)
-    date_text = str(data.get("contract_date", ""))
-    draw.text((right - draw.textlength(date_text, font=regular), y), date_text, fill="#111111", font=regular)
-    y += 38
-
-    def section(text: str) -> None:
-        nonlocal y
-        draw.text((left, y), text, fill="#111111", font=bold)
-        y += 31
-
-    def field(label: str, value: Any) -> None:
-        nonlocal y
-        label_width = 330
-        lines = _wrap_text(draw, str(value or ""), regular, width - label_width)
-        row_height = max(31, len(lines) * 25 + 6)
-        draw.text((left + 10, y + 4), label, fill="#111111", font=bold)
-        line_y = y + 4
-        for line in lines:
-            draw.text((left + label_width, line_y), line, fill="#111111", font=regular)
-            line_y += 25
-        draw.line((left, y + row_height, right, y + row_height), fill="#c6c6c6", width=1)
-        y += row_height
-
-    section("1. Стороны договора.")
-    draw.text((left, y), "Продавец:", fill="#111111", font=bold)
-    y += 29
-    field("Гр.", data.get("seller_full_name"))
-    field("Паспорт:", f"{data.get('seller_passport', '')} от {data.get('seller_passport_issue_date', '')}".strip())
-    field("Выдан:", data.get("seller_passport_issued_by"))
-    field("Адрес:", data.get("seller_address"))
-    y += 6
-    draw.text((left, y), "Покупатель:", fill="#111111", font=bold)
-    y += 29
-    field("Гр.", data.get("buyer_full_name"))
-    field("Паспорт:", f"{data.get('buyer_passport', '')} от {data.get('buyer_passport_issue_date', '')}".strip())
-    field("Выдан:", data.get("buyer_passport_issued_by"))
-    field("Адрес:", data.get("buyer_address"))
-    y += 10
-
-    section("2. Предмет договора.")
-    y = _draw_wrapped(
-        draw,
-        "2.1. Продавец обязуется передать в собственность покупателя, а покупатель обязуется принять и оплатить следующее транспортное средство (далее ТС):",
-        left,
-        y,
-        width,
-        small,
-        line_height=23,
-    ) + 5
-    for label, key in (
-        ("Марка, модель", "vehicle_make_model"),
-        ("Тип транспортного средства", "vehicle_type"),
-        ("Год изготовления ТС", "vehicle_year"),
-        ("Идент. № (VIN)", "vin"),
-        ("№ кузова:", "body_number"),
-        ("№ шасси (рамы):", "chassis_number"),
-        ("Цвет", "color"),
-        ("Паспорт ТС", "pts_series_number"),
-        ("СТС СОР", "sts_series_number"),
-        ("Госномер", "registration_plate"),
-    ):
-        field(label, data.get(key))
-
-    section("3. Стоимость ТС и порядок оплаты.")
-    y = _draw_wrapped(
-        draw,
-        f"3.1. Стоимость {data.get('price', '')} рублей. 3.2. Покупатель оплачивает стоимость автомобиля наличными и/или безналичными денежными средствами в момент подписания настоящего договора. 3.3. Продавец передает ТС в момент подписания настоящего договора.",
-        left,
-        y,
-        width,
-        small,
-        line_height=22,
-    ) + 7
-    section("4. Заключительные положения")
-    y = _draw_wrapped(
-        draw,
-        "4.1. Договор вступает в силу с момента его подписания сторонами. 4.2. Настоящий договор также является Актом приема-передачи ТС и составлен в трех экземплярах, имеющих одинаковую юридическую силу. 4.3. Договор может быть изменен Дополнительным соглашением по согласию сторон. 4.4. Стороны не имеют претензий друг к другу.",
-        left,
-        y,
-        width,
-        small,
-        line_height=22,
-    )
-    signature_y = min(1680, max(y + 34, 1600))
-    half = width // 2 - 30
-    draw.line((left, signature_y, left + half, signature_y), fill="#222222", width=1)
-    draw.line((right - half, signature_y, right, signature_y), fill="#222222", width=1)
-    draw.text((left, signature_y + 7), f"Продавец: {data.get('seller_full_name', '')}", fill="#111111", font=small)
-    draw.text((right - half, signature_y + 7), f"Покупатель: {data.get('buyer_full_name', '')}", fill="#111111", font=small)
-    image.save(jpg_path, "JPEG", quality=94, optimize=True)
-    image.save(pdf_path, "PDF", resolution=150.0)
+    for address, key in CELL_MAP.items():
+        value = data.get(key)
+        sheet[address] = "" if value is None else str(value).strip()
+    _style_input_ranges(sheet)
+    sheet["A4"].alignment = Alignment(horizontal="center", vertical="center")
+    sheet["J4"].alignment = Alignment(horizontal="center", vertical="center")
+    _configure_print(sheet)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    workbook.save(path)
+    workbook.close()
 
 
 def _write_default_workbook(path: Path, payload: dict[str, Any]) -> None:
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Договор"
-    ws.sheet_view.showGridLines = False
-    ws.page_setup.orientation = "portrait"
-    ws.page_setup.paperSize = ws.PAPERSIZE_A4
-    ws.page_margins.left = 0.35
-    ws.page_margins.right = 0.35
-    ws.page_margins.top = 0.4
-    ws.page_margins.bottom = 0.4
-    ws.print_area = "A1:H48"
-
-    widths = [4, 18, 18, 18, 18, 18, 18, 4]
-    for index, width in enumerate(widths, start=1):
-        ws.column_dimensions[get_column_letter(index)].width = width
-
-    ws.merge_cells("A1:H2")
-    contract_number = str(payload.get("contract_number", "")).strip()
-    ws["A1"] = f"ДОГОВОР КУПЛИ-ПРОДАЖИ АВТОМОБИЛЯ № {contract_number}" if contract_number else "ДОГОВОР КУПЛИ-ПРОДАЖИ АВТОМОБИЛЯ"
-    ws["A1"].font = Font(name="Times New Roman", size=15, bold=True)
-    ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
-
-    ws.merge_cells("A3:D3")
-    ws.merge_cells("E3:H3")
-    ws["A3"] = f"г. {payload.get('contract_place', '')}"
-    ws["E3"] = payload.get("contract_date", "")
-    ws["E3"].alignment = Alignment(horizontal="right")
-
-    sections = [
-        ("ПРОДАВЕЦ", [
-            ("ФИО", "seller_full_name"),
-            ("Дата рождения", "seller_birth_date"),
-            ("Паспорт", "seller_passport"),
-            ("Выдан", "seller_passport_issued_by"),
-            ("Дата выдачи", "seller_passport_issue_date"),
-            ("Адрес", "seller_address"),
-            ("Телефон", "seller_phone"),
-        ]),
-        ("ПОКУПАТЕЛЬ", [
-            ("ФИО", "buyer_full_name"),
-            ("Дата рождения", "buyer_birth_date"),
-            ("Паспорт", "buyer_passport"),
-            ("Выдан", "buyer_passport_issued_by"),
-            ("Дата выдачи", "buyer_passport_issue_date"),
-            ("Адрес", "buyer_address"),
-            ("Телефон", "buyer_phone"),
-        ]),
-        ("АВТОМОБИЛЬ", [
-            ("Марка, модель", "vehicle_make_model"),
-            ("Категория ТС", "vehicle_type"),
-            ("Год выпуска", "vehicle_year"),
-            ("VIN", "vin"),
-            ("Кузов", "body_number"),
-            ("Шасси", "chassis_number"),
-            ("Цвет", "color"),
-            ("Госномер", "registration_plate"),
-            ("ПТС", "pts_series_number"),
-            ("СТС", "sts_series_number"),
-        ]),
-    ]
-
-    row = 5
-    thin = Side(style="thin", color="808080")
-    for title, items in sections:
-        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=8)
-        cell = ws.cell(row, 1, title)
-        cell.font = Font(name="Times New Roman", bold=True, color="FFFFFF")
-        cell.fill = PatternFill("solid", fgColor="315B7D")
-        cell.alignment = Alignment(horizontal="center")
+    """Compatibility entry point used by tests and local tools."""
+    if TEMPLATE_PATH.exists():
+        _fill_template(path, payload)
+        return
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Пуст"
+    for column in range(1, 11):
+        sheet.column_dimensions[get_column_letter(column)].width = 11
+    sheet.merge_cells("A1:J2")
+    sheet["A1"] = "ДОГОВОР КУПЛИ-ПРОДАЖИ ТРАНСПОРТНОГО СРЕДСТВА"
+    sheet["A1"].font = Font(name="Arial", size=14, bold=True)
+    sheet["A1"].alignment = Alignment(horizontal="center", vertical="center")
+    row = 4
+    for label, key in (("Продавец", "seller_full_name"), ("Покупатель", "buyer_full_name"), ("VIN", "vin")):
+        sheet.cell(row, 1, label)
+        sheet.merge_cells(start_row=row, start_column=2, end_row=row, end_column=10)
+        sheet.cell(row, 2, str(payload.get(key, "")))
+        for column in range(1, 11):
+            sheet.cell(row, column).border = Border(bottom=BLACK_SIDE)
         row += 1
-        for label, key in items:
-            ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=2)
-            ws.merge_cells(start_row=row, start_column=3, end_row=row, end_column=8)
-            ws.cell(row, 1, label).font = Font(name="Times New Roman", bold=True)
-            ws.cell(row, 3, str(payload.get(key, ""))).font = Font(name="Times New Roman", size=10)
-            for col in range(1, 9):
-                ws.cell(row, col).border = Border(bottom=thin)
-            row += 1
-        row += 1
-
-    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=8)
-    ws.cell(row, 1, f"Стоимость автомобиля: {payload.get('price', '')} руб.")
-    ws.cell(row, 1).font = Font(name="Times New Roman", bold=True)
-    row += 2
-    ws.merge_cells(start_row=row, start_column=1, end_row=row + 2, end_column=8)
-    ws.cell(
-        row,
-        1,
-        "Продавец передал, а Покупатель принял автомобиль и документы на него. "
-        "Стороны подтверждают правильность указанных данных и отсутствие взаимных претензий.",
-    )
-    ws.cell(row, 1).alignment = Alignment(wrap_text=True, vertical="top")
-    ws.cell(row, 1).font = Font(name="Times New Roman")
-    row += 4
-    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=4)
-    ws.merge_cells(start_row=row, start_column=5, end_row=row, end_column=8)
-    seller_name = str(payload.get("seller_full_name", "")).strip()
-    buyer_name = str(payload.get("buyer_full_name", "")).strip()
-    ws.cell(row, 1, f"Продавец: __________ / {seller_name}")
-    ws.cell(row, 5, f"Покупатель: ________ / {buyer_name}")
-    ws.cell(row, 1).font = Font(name="Times New Roman", size=10)
-    ws.cell(row, 5).font = Font(name="Times New Roman", size=10)
-    ws.sheet_properties.pageSetUpPr.fitToPage = True
-    ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 1
-    wb.save(path)
+    _configure_print(sheet)
+    workbook.save(path)
+    workbook.close()
 
 
-def _fill_baza_copy(
-    template: Path,
-    xls_path: Path,
-    pdf_path: Path,
-    jpg_path: Path,
-    payload: dict[str, Any],
-) -> None:
-    xls_path.parent.mkdir(parents=True, exist_ok=True)
-    data = _prepare_baza_payload(payload)
-    source = xlrd.open_workbook(str(template), formatting_info=True)
-    writable = copy_xls(source)
-    sheet = writable.get_sheet(source.sheet_names().index("Пуст"))
-    cells = {
-        (3, 0): data.get("contract_place"),
-        (3, 9): data.get("contract_date"),
-        (8, 1): data.get("seller_full_name"),
-        (9, 3): data.get("seller_passport"),
-        (9, 7): data.get("seller_passport_issue_date"),
-        (10, 3): data.get("seller_passport_issued_by"),
-        (11, 3): data.get("seller_address"),
-        (14, 1): data.get("buyer_full_name"),
-        (15, 3): data.get("buyer_passport"),
-        (15, 7): data.get("buyer_passport_issue_date"),
-        (16, 3): data.get("buyer_passport_issued_by"),
-        (17, 3): data.get("buyer_address"),
-        (21, 3): data.get("vehicle_make_model"),
-        (22, 3): data.get("vehicle_type"),
-        (23, 3): data.get("vehicle_year"),
-        (24, 3): data.get("vin"),
-        (25, 3): data.get("body_number"),
-        (26, 3): data.get("chassis_number"),
-        (27, 3): data.get("color"),
-        (28, 3): data.get("pts_series_number"),
-        (29, 3): data.get("sts_series_number"),
-        (30, 3): data.get("registration_plate"),
-        (33, 3): data.get("price"),
-        (42, 6): data.get("seller_full_name"),
-        (45, 6): data.get("buyer_full_name"),
-    }
-    for (row, column), value in cells.items():
-        if value is not None and str(value).strip():
-            sheet.write(row, column, str(value))
-    writable.save(str(xls_path))
-    _render_contract_outputs(pdf_path, jpg_path, payload)
+def _register_pdf_fonts() -> None:
+    if "AutoDogovor" not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(TTFont("AutoDogovor", str(FONT_REGULAR)))
+    if "AutoDogovorBold" not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(TTFont("AutoDogovorBold", str(FONT_BOLD)))
+
+
+def _fill_rgb(cell) -> tuple[float, float, float] | None:
+    color = cell.fill.fgColor
+    if cell.fill.fill_type != "solid" or color.type != "rgb" or not color.rgb:
+        return None
+    value = color.rgb[-6:]
+    return tuple(int(value[index:index + 2], 16) / 255 for index in (0, 2, 4))
+
+
+def _wrap_pdf_text(text: str, font_name: str, font_size: float, width: float) -> list[str]:
+    words = str(text or "").split()
+    if not words:
+        return []
+    lines: list[str] = []
+    current = words[0]
+    for word in words[1:]:
+        candidate = f"{current} {word}"
+        if pdfmetrics.stringWidth(candidate, font_name, font_size) <= width:
+            current = candidate
+        else:
+            lines.append(current)
+            current = word
+    lines.append(current)
+    return lines
+
+
+def _render_workbook_pdf(xlsx_path: Path, pdf_path: Path) -> None:
+    _register_pdf_fonts()
+    workbook = load_workbook(xlsx_path, data_only=True)
+    sheet = workbook["Пуст"]
+    page_width, page_height = A4
+    margin_x, margin_y = 24.0, 22.0
+    column_units = [sheet.column_dimensions[get_column_letter(column)].width or 8.43 for column in range(1, 11)]
+    row_units = [sheet.row_dimensions[row].height or 15 for row in range(1, 48)]
+    width_scale = (page_width - margin_x * 2) / sum(column_units)
+    height_scale = (page_height - margin_y * 2) / sum(row_units)
+    x_positions = [margin_x]
+    for width in column_units:
+        x_positions.append(x_positions[-1] + width * width_scale)
+    y_positions = [page_height - margin_y]
+    for height in row_units:
+        y_positions.append(y_positions[-1] - height * height_scale)
+
+    merged_anchors: dict[tuple[int, int], tuple[int, int]] = {}
+    covered: set[tuple[int, int]] = set()
+    for merged in sheet.merged_cells.ranges:
+        merged_anchors[(merged.min_row, merged.min_col)] = (merged.max_row, merged.max_col)
+        for row in range(merged.min_row, merged.max_row + 1):
+            for column in range(merged.min_col, merged.max_col + 1):
+                if (row, column) != (merged.min_row, merged.min_col):
+                    covered.add((row, column))
+
+    pdf_path.parent.mkdir(parents=True, exist_ok=True)
+    document = canvas.Canvas(str(pdf_path), pagesize=A4, pageCompression=1)
+    for row in range(1, 48):
+        for column in range(1, 11):
+            if (row, column) in covered:
+                continue
+            end_row, end_column = merged_anchors.get((row, column), (row, column))
+            cell = sheet.cell(row, column)
+            x1, x2 = x_positions[column - 1], x_positions[end_column]
+            y_top, y_bottom = y_positions[row - 1], y_positions[end_row]
+            width, height = x2 - x1, y_top - y_bottom
+            fill = _fill_rgb(cell)
+            if fill:
+                document.setFillColorRGB(*fill)
+                document.rect(x1, y_bottom, width, height, fill=1, stroke=0)
+
+            edge_cells = {
+                "left": sheet.cell(row, column),
+                "right": sheet.cell(row, end_column),
+                "top": sheet.cell(row, column),
+                "bottom": sheet.cell(end_row, column),
+            }
+            document.setStrokeColorRGB(0, 0, 0)
+            document.setLineWidth(0.55)
+            if edge_cells["top"].border.top.style:
+                document.line(x1, y_top, x2, y_top)
+            if edge_cells["bottom"].border.bottom.style:
+                document.line(x1, y_bottom, x2, y_bottom)
+            if edge_cells["left"].border.left.style:
+                document.line(x1, y_bottom, x1, y_top)
+            if edge_cells["right"].border.right.style:
+                document.line(x2, y_bottom, x2, y_top)
+
+            value = "" if cell.value is None else str(cell.value)
+            if not value or value in {"0", "0.0", ","}:
+                continue
+            font_name = "AutoDogovorBold" if cell.font.bold else "AutoDogovor"
+            font_size = max(6.8, min(13.5, float(cell.font.sz or 10) * 1.03))
+            text_width = max(4, width - 5)
+            lines = _wrap_pdf_text(value, font_name, font_size, text_width)
+            while lines and len(lines) * font_size * 1.08 > height - 2 and font_size > 5.8:
+                font_size -= 0.35
+                lines = _wrap_pdf_text(value, font_name, font_size, text_width)
+            line_height = font_size * 1.08
+            total_height = len(lines) * line_height
+            vertical = cell.alignment.vertical or "bottom"
+            if vertical == "top":
+                baseline = y_top - font_size - 1.5
+            elif vertical == "center":
+                baseline = y_bottom + (height + total_height) / 2 - line_height
+            else:
+                baseline = y_bottom + total_height - line_height + 1.5
+            document.setFillColorRGB(0.04, 0.04, 0.04)
+            document.setFont(font_name, font_size)
+            for line in lines:
+                line_width = pdfmetrics.stringWidth(line, font_name, font_size)
+                horizontal = cell.alignment.horizontal or "left"
+                if horizontal in {"center", "centerContinuous"}:
+                    text_x = x1 + (width - line_width) / 2
+                elif horizontal == "right":
+                    text_x = x2 - line_width - 2.5
+                else:
+                    text_x = x1 + 2.5
+                document.drawString(text_x, baseline, line)
+                baseline -= line_height
+    document.showPage()
+    document.save()
+    workbook.close()
+
+
+def _render_pdf_jpg(pdf_path: Path, jpg_path: Path) -> None:
+    document = pdfium.PdfDocument(str(pdf_path))
+    if len(document) != 1:
+        raise ValueError("Договор должен помещаться на одной странице")
+    page = document[0]
+    bitmap = page.render(scale=150 / 72)
+    image: Image.Image = bitmap.to_pil().convert("RGB")
+    image.save(jpg_path, "JPEG", quality=95, optimize=True)
+    bitmap.close()
+    page.close()
+    document.close()
 
 
 def create_contract(deal_id: int, payload: dict[str, Any]) -> list[dict[str, str]]:
-    if TEMPLATE_PATH.exists():
-        xls_path = _output_path(deal_id, payload, ".xls")
-        pdf_path = _output_path(deal_id, payload, ".pdf")
-        jpg_path = _output_path(deal_id, payload, ".jpg")
-        _fill_baza_copy(TEMPLATE_PATH, xls_path, pdf_path, jpg_path, payload)
-        return [
-            {
-                "kind": "xls",
-                "name": xls_path.name,
-                "stored_path": str(xls_path),
-                "media_type": "application/vnd.ms-excel",
-            },
-            {
-                "kind": "pdf",
-                "name": pdf_path.name,
-                "stored_path": str(pdf_path),
-                "media_type": "application/pdf",
-            },
-            {
-                "kind": "jpg",
-                "name": jpg_path.name,
-                "stored_path": str(jpg_path),
-                "media_type": "image/jpeg",
-            },
-        ]
-
-    target = _output_path(deal_id, payload, ".xlsx")
-    _write_default_workbook(target, payload)
+    xlsx_path = _output_path(deal_id, payload, ".xlsx")
+    pdf_path = _output_path(deal_id, payload, ".pdf")
+    jpg_path = _output_path(deal_id, payload, ".jpg")
+    _fill_template(xlsx_path, payload)
+    _render_workbook_pdf(xlsx_path, pdf_path)
+    _render_pdf_jpg(pdf_path, jpg_path)
     return [
         {
             "kind": "xlsx",
-            "name": target.name,
-            "stored_path": str(target),
+            "name": xlsx_path.name,
+            "stored_path": str(xlsx_path),
             "media_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        }
+        },
+        {"kind": "pdf", "name": pdf_path.name, "stored_path": str(pdf_path), "media_type": "application/pdf"},
+        {"kind": "jpg", "name": jpg_path.name, "stored_path": str(jpg_path), "media_type": "image/jpeg"},
     ]
