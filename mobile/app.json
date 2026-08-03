@@ -3,21 +3,21 @@
     "name": "АвтоДоговор",
     "slug": "autodogovor",
     "scheme": "autodogovor",
-    "version": "1.0.5.1",
+    "version": "1.0.6",
     "orientation": "portrait",
     "icon": "./assets/autodogovor-icon.png",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "ru.avtodogovor.mobile",
-      "buildNumber": "5",
+      "buildNumber": "6",
       "infoPlist": {
         "NSFaceIDUsageDescription": "Биометрия защищает персональные данные в архиве договоров."
       }
     },
     "android": {
       "package": "ru.avtodogovor.mobile",
-      "versionCode": 5,
+      "versionCode": 6,
       "allowBackup": false,
       "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {

@@ -89,5 +89,8 @@ test("разрешает безопасный адрес гибридного с
 test("блокирует переход WebView на другой источник", () => {
   const server = "https://dkp.example.ru";
   assert.equal(isTrustedHybridNavigation(`${server}/api/health`, server), true);
+  assert.equal(isTrustedHybridNavigation("https://auth.openai.com/authorize", server), true);
+  assert.equal(isTrustedHybridNavigation("https://github.com/login/oauth/authorize", server), true);
+  assert.equal(isTrustedHybridNavigation("http://github.com/login", server), false);
   assert.equal(isTrustedHybridNavigation("https://example.org/phishing", server), false);
 });

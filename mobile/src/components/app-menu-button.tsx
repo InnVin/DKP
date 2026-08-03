@@ -70,7 +70,7 @@ export function AppMenuButton() {
                 <Text style={{ color: colors.text, fontSize: 24, fontWeight: "800" }}>
                   АвтоДоговор
                 </Text>
-                <Text style={{ color: colors.muted, fontSize: 13 }}>Версия 1.0.5.1</Text>
+                <Text style={{ color: colors.muted, fontSize: 13 }}>Версия 1.0.6</Text>
               </View>
               {menuItems.map((item) => (
                 <Pressable

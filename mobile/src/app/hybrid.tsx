@@ -26,7 +26,8 @@ import {
 import { secureSettings } from "@/lib/secure-settings";
 import { useAppColors } from "@/theme/use-app-colors";
 
-const HYBRID_VERSION = "1.0.5.1";
+const HYBRID_VERSION = "1.0.6";
+const DEFAULT_CLOUD_URL = "https://innvinjapan-avtodogovor.innvinjapan.chatgpt.site";
 const BRIDGE_VERSION = 1;
 
 interface BridgeMessage {
@@ -41,8 +42,8 @@ export default function HybridScreen() {
   const router = useRouter();
   const webViewRef = useRef<WebView>(null);
   const [loadingSettings, setLoadingSettings] = useState(true);
-  const [serverUrl, setServerUrl] = useState("");
-  const [draftUrl, setDraftUrl] = useState("");
+  const [serverUrl, setServerUrl] = useState(DEFAULT_CLOUD_URL);
+  const [draftUrl, setDraftUrl] = useState(DEFAULT_CLOUD_URL);
   const [editingAddress, setEditingAddress] = useState(false);
   const [checking, setChecking] = useState(false);
   const [formError, setFormError] = useState("");
@@ -51,7 +52,8 @@ export default function HybridScreen() {
 
   useEffect(() => {
     void secureSettings.getHybridServerUrl().then(savedUrl => {
-      const initialUrl = savedUrl || process.env.EXPO_PUBLIC_AUTODOGOVOR_WEB_URL || "";
+      const savedCloudUrl = savedUrl?.includes(".chatgpt.site") ? savedUrl : "";
+      const initialUrl = savedCloudUrl || process.env.EXPO_PUBLIC_AUTODOGOVOR_WEB_URL || DEFAULT_CLOUD_URL;
       setServerUrl(initialUrl);
       setDraftUrl(initialUrl);
       setEditingAddress(!initialUrl);
@@ -236,12 +238,11 @@ export default function HybridScreen() {
             >
               <View style={{ gap: 8 }}>
                 <Text style={{ color: colors.text, fontSize: 28, fontWeight: "800" }}>
-                  АвтоДоговор 1.0.5.1
+                  АвтоДоговор 1.0.6
                 </Text>
                 <Text selectable style={{ color: colors.muted, fontSize: 15, lineHeight: 22 }}>
-                  Укажите адрес веб-приложения. Внешний сервер должен работать через HTTPS.
-                  Для проверки в локальной сети разрешены адреса компьютера вида
-                  http://192.168.x.x:8765.
+                  Приложение автоматически открывает защищённую облачную версию.
+                  Здесь адрес можно изменить вручную, если это потребуется позже.
                 </Text>
               </View>
 
@@ -254,7 +255,7 @@ export default function HybridScreen() {
                   autoCapitalize="none"
                   autoCorrect={false}
                   keyboardType="url"
-                  placeholder="https://app.example.ru"
+                  placeholder={DEFAULT_CLOUD_URL}
                   placeholderTextColor={colors.muted}
                   value={draftUrl}
                   onChangeText={setDraftUrl}

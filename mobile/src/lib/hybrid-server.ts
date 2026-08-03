@@ -5,6 +5,13 @@ const PRIVATE_IPV4_PATTERNS = [
   /^172\.(1[6-9]|2\d|3[01])\./,
 ];
 
+const TRUSTED_AUTH_HOSTS = [
+  "chatgpt.com",
+  "openai.com",
+  "github.com",
+  "githubusercontent.com",
+];
+
 function isPrivateHost(hostname: string) {
   const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, "");
   return (
@@ -45,7 +52,13 @@ export function normalizeHybridServerUrl(input: string) {
 export function isTrustedHybridNavigation(target: string, serverUrl: string) {
   if (target === "about:blank") return true;
   try {
-    return new URL(target).origin === new URL(serverUrl).origin;
+    const targetUrl = new URL(target);
+    if (targetUrl.origin === new URL(serverUrl).origin) return true;
+    if (targetUrl.protocol !== "https:") return false;
+    const hostname = targetUrl.hostname.toLowerCase();
+    return TRUSTED_AUTH_HOSTS.some(
+      host => hostname === host || hostname.endsWith(`.${host}`),
+    );
   } catch {
     return false;
   }
