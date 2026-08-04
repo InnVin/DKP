@@ -37,7 +37,7 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
   }
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "HTTP-Referer": "https://innvinjapan-avtodogovor.innvinjapan.chatgpt.site", "X-Title": "АвтоДоговор Cloud" },
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "HTTP-Referer": "https://dkp-app.innvinjapan.chatgpt.site", "X-Title": "АвтоДоговор Cloud" },
     body: JSON.stringify({ model: "qwen/qwen3-vl-32b-instruct", temperature: 0, messages: [{ role: "user", content }] }),
   });
   if (!response.ok) return json({ error: `OCR временно недоступен (${response.status})` }, { status: 502 });

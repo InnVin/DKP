@@ -4,7 +4,7 @@
 
 ## Web/Cloud/APK 1.0.6
 
-Основная версия работает в облаке по адресу `https://innvinjapan-avtodogovor.innvinjapan.chatgpt.site`.
+Основная версия работает в облаке по адресу `https://dkp-app.innvinjapan.chatgpt.site`.
 Android-приложение открывает её автоматически без Tailscale, VPN и ручного ввода адреса.
 
 - При первом запуске войдите через GitHub; дальше сессия сохраняется.

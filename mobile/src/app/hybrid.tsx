@@ -27,7 +27,7 @@ import { secureSettings } from "@/lib/secure-settings";
 import { useAppColors } from "@/theme/use-app-colors";
 
 const HYBRID_VERSION = "1.0.6";
-const DEFAULT_CLOUD_URL = "https://innvinjapan-avtodogovor.innvinjapan.chatgpt.site";
+const DEFAULT_CLOUD_URL = "https://dkp-app.innvinjapan.chatgpt.site";
 const BRIDGE_VERSION = 1;
 
 interface BridgeMessage {

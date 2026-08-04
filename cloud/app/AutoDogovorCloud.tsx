@@ -27,6 +27,54 @@ const emptyDeal = (): Deal => ({
 
 const value = (deal: Deal, key: string) => String(deal[key] ?? "");
 
+const targetImageBytes = 900 * 1024;
+const maxUploadBytes = 2 * 1024 * 1024;
+
+function canvasBlob(canvas: HTMLCanvasElement, quality: number) {
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("Не удалось подготовить фотографию")), "image/jpeg", quality);
+  });
+}
+
+async function prepareUpload(file: File) {
+  if (!file.type.startsWith("image/")) {
+    if (file.size > maxUploadBytes) throw new Error(`Файл «${file.name}» слишком большой. Максимум 2 МБ.`);
+    return file;
+  }
+
+  let image: ImageBitmap;
+  try {
+    image = await createImageBitmap(file, { imageOrientation: "from-image" });
+  } catch {
+    throw new Error(`Не удалось прочитать фотографию «${file.name}». Выберите JPG, PNG или WEBP.`);
+  }
+
+  try {
+    const initialScale = Math.min(1, 2400 / Math.max(image.width, image.height));
+    let best: Blob | null = null;
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const dimensionScale = initialScale * Math.pow(0.86, Math.floor(attempt / 2));
+      const width = Math.max(640, Math.round(image.width * dimensionScale));
+      const height = Math.max(640, Math.round(image.height * dimensionScale));
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("Не удалось подготовить фотографию");
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, width, height);
+      context.drawImage(image, 0, 0, width, height);
+      best = await canvasBlob(canvas, Math.max(0.5, 0.9 - (attempt % 2) * 0.16));
+      if (best.size <= targetImageBytes) break;
+    }
+    if (!best || best.size > maxUploadBytes) throw new Error(`Не удалось уменьшить «${file.name}» до допустимого размера.`);
+    const baseName = file.name.replace(/\.[^.]+$/, "") || "photo";
+    return new File([best], `${baseName}.jpg`, { type: "image/jpeg", lastModified: file.lastModified });
+  } finally {
+    image.close();
+  }
+}
+
 export default function AutoDogovorCloud() {
   const [deal, setDeal] = useState<Deal>(emptyDeal());
   const [deals, setDeals] = useState<Deal[]>([]);
@@ -58,7 +106,18 @@ export default function AutoDogovorCloud() {
 
   async function api(url: string, options?: RequestInit) {
     const response = await fetch(url, options);
-    const payload = await response.json();
+    const text = await response.text();
+    let payload: Record<string, any> = {};
+    if (text) {
+      try { payload = JSON.parse(text); }
+      catch {
+        if (response.status === 413 || /payload too large/i.test(text)) {
+          throw new Error("Фотография слишком большая. Приложение не смогло уменьшить её автоматически.");
+        }
+        if (!response.ok) throw new Error("Сервер временно не смог обработать запрос. Повторите ещё раз.");
+        throw new Error("Сервер вернул непонятный ответ. Повторите ещё раз.");
+      }
+    }
     if (!response.ok) throw new Error(payload.error || "Не удалось выполнить действие");
     return payload;
   }
@@ -104,13 +163,27 @@ export default function AutoDogovorCloud() {
 
   async function upload(type: string, event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files || []); if (!files.length || !deal.id) return;
+    event.target.value = "";
     setBusy(true);
+    const uploaded: DocumentItem[] = [];
+    const failed: string[] = [];
     try {
-      const body = new FormData(); body.append("document_type", type); files.forEach(file => body.append("photos", file));
-      const payload = await api(`/api/deals/${deal.id}/documents`, { method: "POST", body });
-      setDocuments(items => [...items, ...payload.documents]); notify(`Загружено: ${files.length}`);
-    } catch (error) { notify(error instanceof Error ? error.message : "Ошибка загрузки"); }
-    finally { setBusy(false); event.target.value = ""; }
+      for (const file of files) {
+        try {
+          const prepared = await prepareUpload(file);
+          const body = new FormData();
+          body.append("document_type", type);
+          body.append("photos", prepared);
+          const payload = await api(`/api/deals/${deal.id}/documents`, { method: "POST", body });
+          uploaded.push(...(payload.documents || []));
+        } catch (error) {
+          failed.push(error instanceof Error ? error.message : `Не удалось загрузить «${file.name}»`);
+        }
+      }
+      if (uploaded.length) setDocuments(items => [...items, ...uploaded]);
+      if (failed.length) notify(`Загружено: ${uploaded.length}. ${failed[0]}`);
+      else notify(`Загружено: ${uploaded.length}`);
+    } finally { setBusy(false); }
   }
 
   async function removeDocument(id: string) {

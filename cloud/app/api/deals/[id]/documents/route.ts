@@ -18,7 +18,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const owner = await ownerId();
   const exists = await bindings().DB.prepare("SELECT 1 ok FROM deals WHERE id = ? AND owner_id = ?").bind(id, owner).first();
   if (!exists) return json({ error: "ДКП не найден" }, { status: 404 });
-  const form = await request.formData();
+  let form: FormData;
+  try {
+    form = await request.formData();
+  } catch {
+    return json({ error: "Не удалось прочитать фотографии. Попробуйте выбрать их ещё раз." }, { status: 400 });
+  }
   const type = String(form.get("document_type") || "other").replace(/[^a-z_]/g, "");
   const files = form.getAll("photos").filter((item): item is File => item instanceof File);
   if (!files.length) return json({ error: "Выберите фотографии" }, { status: 400 });
@@ -26,7 +31,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   for (const file of files) {
     const ext = allowed.get(file.type);
     if (!ext) return json({ error: `Формат ${file.type || "неизвестен"} не поддерживается` }, { status: 415 });
-    if (file.size > 15 * 1024 * 1024) return json({ error: "Размер одного файла не должен превышать 15 МБ" }, { status: 413 });
+    if (file.size > 2 * 1024 * 1024) return json({ error: "Фотография слишком большая. Максимальный размер после уменьшения — 2 МБ." }, { status: 413 });
     const docId = crypto.randomUUID();
     const key = `${owner}/deals/${id}/documents/${docId}${ext}`;
     await bindings().FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type }, customMetadata: { owner, deal: id, original: file.name } });
