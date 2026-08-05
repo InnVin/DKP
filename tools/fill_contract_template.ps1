@@ -6,7 +6,10 @@ param(
     [string]$OutputPath,
 
     [Parameter(Mandatory = $true)]
-    [string]$JsonPath
+    [string]$JsonPath,
+
+    [string]$PdfPath = "",
+    [string]$JpgPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -24,7 +27,9 @@ $excel.Visible = $false
 $excel.DisplayAlerts = $false
 $excel.AskToUpdateLinks = $false
 $excel.EnableEvents = $false
+$excel.ScreenUpdating = $false
 $workbook = $null
+$sheet = $null
 
 function Set-TemplateCell {
     param(
@@ -34,16 +39,17 @@ function Set-TemplateCell {
     if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) {
         return
     }
-    $cell = $script:sheet.Range($Address)
-    $cell.NumberFormat = "@"
-    $cell.Value2 = [string]$Value
-    $cell.Font.Name = "Times New Roman"
-    $cell.Font.Size = 10
+    try {
+        $sheet.Range($Address).Value2 = [string]$Value
+    }
+    catch {
+        throw "$Address`: $($_.Exception.Message)"
+    }
 }
 
 try {
     $workbook = $excel.Workbooks.Open($OutputPath, 0, $false)
-    $script:sheet = $workbook.Worksheets.Item($sheetName)
+    $sheet = $workbook.Worksheets.Item($sheetName)
 
     Set-TemplateCell "A4" $data.contract_place
     Set-TemplateCell "J4" $data.contract_date
@@ -51,22 +57,16 @@ try {
     Set-TemplateCell "B9" $data.seller_full_name
     Set-TemplateCell "D10" $data.seller_passport
     Set-TemplateCell "H10" $data.seller_passport_issue_date
-    Set-TemplateCell "J10" $data.seller_phone
     Set-TemplateCell "D11" $data.seller_passport_issued_by
     Set-TemplateCell "D12" $data.seller_address
+    Set-TemplateCell "J10" $data.seller_phone
 
     Set-TemplateCell "B15" $data.buyer_full_name
     Set-TemplateCell "D16" $data.buyer_passport
-    if (-not [string]::IsNullOrWhiteSpace([string]$data.buyer_phone)) {
-        $script:sheet.Range("H16:J16").UnMerge()
-        $script:sheet.Range("H10:J10").Copy()
-        $script:sheet.Range("H16:J16").PasteSpecial(-4122)
-        Set-TemplateCell "I16" (U "0442 0435 043B 002E 003A")
-        Set-TemplateCell "J16" $data.buyer_phone
-    }
     Set-TemplateCell "H16" $data.buyer_passport_issue_date
     Set-TemplateCell "D17" $data.buyer_passport_issued_by
     Set-TemplateCell "D18" $data.buyer_address
+    Set-TemplateCell "J16" $data.buyer_phone
 
     Set-TemplateCell "D22" $data.vehicle_make_model
     Set-TemplateCell "D23" $data.vehicle_type
@@ -82,16 +82,30 @@ try {
 
     Set-TemplateCell "G43" $data.seller_full_name
     Set-TemplateCell "G46" $data.buyer_full_name
-    $script:sheet.Range("A47").ClearContents()
 
+    $sheet.PageSetup.PrintArea = "`$A`$1:`$J`$47"
+    $sheet.PageSetup.Zoom = $false
+    $sheet.PageSetup.FitToPagesWide = 1
+    $sheet.PageSetup.FitToPagesTall = 1
+    $sheet.PageSetup.PaperSize = 9
+    $sheet.PageSetup.Orientation = 1
     $workbook.Save()
+    if (-not [string]::IsNullOrWhiteSpace($PdfPath)) {
+        $workbook.ExportAsFixedFormat(0, $PdfPath, 0, $true, $false)
+    }
 }
 finally {
     if ($workbook) {
         $workbook.Close($false)
     }
     $excel.Quit()
-    $script:sheet = $null
+    if ($sheet) {
+        [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($sheet)
+    }
+    if ($workbook) {
+        [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($workbook)
+    }
+    [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel)
 }
 
 Write-Output "OK"

@@ -6,7 +6,19 @@ export const deals = sqliteTable("deals", {
   dataJson: text("data_json").notNull(),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
-}, table => [index("idx_deals_owner_updated").on(table.ownerId, table.updatedAt)]);
+  deletedAt: integer("deleted_at"),
+  supabaseSyncedAt: integer("supabase_synced_at").notNull().default(0),
+}, table => [
+  index("idx_deals_owner_updated").on(table.ownerId, table.updatedAt),
+  index("idx_deals_owner_active").on(table.ownerId, table.deletedAt, table.updatedAt),
+]);
+
+export const supabaseSyncQueue = sqliteTable("supabase_sync_queue", {
+  dealId: text("deal_id").primaryKey(),
+  ownerId: text("owner_id").notNull(),
+  attempts: integer("attempts").notNull().default(0),
+  updatedAt: integer("updated_at").notNull(),
+}, table => [index("idx_supabase_sync_queue_owner").on(table.ownerId, table.updatedAt)]);
 
 export const documents = sqliteTable("documents", {
   id: text("id").primaryKey(),

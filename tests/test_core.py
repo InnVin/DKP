@@ -159,7 +159,7 @@ class ExcelTests(unittest.TestCase):
         payload = _prepare_baza_payload({"contract_date": "2026-06-18"})
         self.assertEqual(payload["contract_date"], "18.06.2026")
 
-    def test_canonical_baza_outputs_xlsx_pdf_jpg(self):
+    def test_canonical_baza_outputs_xls_pdf_jpeg(self):
         payload = {
             "contract_place": "г. Якутск",
             "contract_date": "2026-07-30",
@@ -190,25 +190,16 @@ class ExcelTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as folder:
                 database.DEALS_DIR = Path(folder)
                 files = create_contract(77, payload)
-                self.assertEqual({item["kind"] for item in files}, {"xlsx", "pdf", "jpg"})
+                self.assertEqual({item["kind"] for item in files}, {"xls", "pdf", "jpg"})
                 paths = {item["kind"]: Path(item["stored_path"]) for item in files}
                 self.assertTrue(all(path.exists() and path.stat().st_size > 1000 for path in paths.values()))
-                workbook = load_workbook(paths["xlsx"])
-                sheet = workbook["Пуст"]
-                self.assertEqual(sheet["D22"].value, "TOYOTA BELTA")
-                self.assertEqual(sheet["D22"].fill.fgColor.rgb[-6:], "E7E9E8")
-                self.assertEqual(sheet["A4"].alignment.horizontal, "center")
-                self.assertEqual(sheet.print_area, "'Пуст'!$A$1:$J$47")
-                self.assertEqual(sheet.page_setup.fitToWidth, 1)
-                self.assertEqual(sheet.page_setup.fitToHeight, 1)
-                workbook.close()
+                self.assertEqual(paths["xls"].read_bytes()[:8], bytes.fromhex("D0CF11E0A1B11AE1"))
                 self.assertEqual(paths["pdf"].read_bytes()[:4], b"%PDF")
                 pdf = pdfium.PdfDocument(str(paths["pdf"]))
                 self.assertEqual(len(pdf), 1)
                 pdf.close()
                 with Image.open(paths["jpg"]) as image:
-                    self.assertTrue(1238 <= image.width <= 1242)
-                    self.assertTrue(1752 <= image.height <= 1756)
+                    self.assertEqual(image.size, (2480, 3508))
         finally:
             database.DEALS_DIR = original_deals_dir
 

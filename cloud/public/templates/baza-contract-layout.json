@@ -1,0 +1,252 @@
+{
+  "A4": {
+    "key": "contract_place",
+    "x": 100,
+    "y": 258,
+    "width": 344,
+    "height": 55,
+    "fontSize": 41,
+    "bold": false,
+    "align": "center"
+  },
+  "J4": {
+    "key": "contract_date",
+    "x": 1864,
+    "y": 258,
+    "width": 516,
+    "height": 55,
+    "fontSize": 41,
+    "bold": false,
+    "align": "center"
+  },
+  "B9": {
+    "key": "seller_full_name",
+    "x": 222,
+    "y": 534,
+    "width": 2158,
+    "height": 68,
+    "fontSize": 49,
+    "bold": true,
+    "align": "left"
+  },
+  "D10": {
+    "key": "seller_passport",
+    "x": 444,
+    "y": 602,
+    "width": 489,
+    "height": 68,
+    "fontSize": 49,
+    "bold": false,
+    "align": "left"
+  },
+  "H10": {
+    "key": "seller_passport_issue_date",
+    "x": 1167,
+    "y": 602,
+    "width": 285,
+    "height": 68,
+    "fontSize": 49,
+    "bold": false,
+    "align": "left"
+  },
+  "D11": {
+    "key": "seller_passport_issued",
+    "x": 444,
+    "y": 671,
+    "width": 1936,
+    "height": 68,
+    "fontSize": 49,
+    "bold": false,
+    "align": "left"
+  },
+  "D12": {
+    "key": "seller_address",
+    "x": 444,
+    "y": 739,
+    "width": 1936,
+    "height": 124,
+    "fontSize": 49,
+    "bold": false,
+    "align": "left"
+  },
+  "B15": {
+    "key": "buyer_full_name",
+    "x": 222,
+    "y": 983,
+    "width": 2158,
+    "height": 68,
+    "fontSize": 49,
+    "bold": true,
+    "align": "left"
+  },
+  "D16": {
+    "key": "buyer_passport",
+    "x": 444,
+    "y": 1051,
+    "width": 489,
+    "height": 68,
+    "fontSize": 49,
+    "bold": false,
+    "align": "left"
+  },
+  "H16": {
+    "key": "buyer_passport_issue_date",
+    "x": 1167,
+    "y": 1051,
+    "width": 285,
+    "height": 68,
+    "fontSize": 49,
+    "bold": false,
+    "align": "left"
+  },
+  "D17": {
+    "key": "buyer_passport_issued",
+    "x": 444,
+    "y": 1120,
+    "width": 1936,
+    "height": 68,
+    "fontSize": 49,
+    "bold": false,
+    "align": "left"
+  },
+  "D18": {
+    "key": "buyer_address",
+    "x": 444,
+    "y": 1188,
+    "width": 1936,
+    "height": 120,
+    "fontSize": 49,
+    "bold": false,
+    "align": "left"
+  },
+  "D22": {
+    "key": "vehicle_make_model",
+    "x": 444,
+    "y": 1549,
+    "width": 1936,
+    "height": 55,
+    "fontSize": 41,
+    "bold": false,
+    "align": "left"
+  },
+  "D23": {
+    "key": "vehicle_category",
+    "x": 444,
+    "y": 1604,
+    "width": 1936,
+    "height": 55,
+    "fontSize": 41,
+    "bold": false,
+    "align": "left"
+  },
+  "D24": {
+    "key": "vehicle_year",
+    "x": 444,
+    "y": 1660,
+    "width": 1936,
+    "height": 55,
+    "fontSize": 41,
+    "bold": false,
+    "align": "left"
+  },
+  "D25": {
+    "key": "vehicle_vin",
+    "x": 444,
+    "y": 1715,
+    "width": 1936,
+    "height": 55,
+    "fontSize": 41,
+    "bold": false,
+    "align": "left"
+  },
+  "D26": {
+    "key": "vehicle_body",
+    "x": 444,
+    "y": 1770,
+    "width": 1936,
+    "height": 55,
+    "fontSize": 41,
+    "bold": false,
+    "align": "left"
+  },
+  "D27": {
+    "key": "vehicle_chassis",
+    "x": 444,
+    "y": 1826,
+    "width": 1936,
+    "height": 55,
+    "fontSize": 41,
+    "bold": false,
+    "align": "left"
+  },
+  "D28": {
+    "key": "vehicle_color",
+    "x": 444,
+    "y": 1881,
+    "width": 1936,
+    "height": 55,
+    "fontSize": 41,
+    "bold": false,
+    "align": "left"
+  },
+  "D29": {
+    "key": "vehicle_pts",
+    "x": 444,
+    "y": 1936,
+    "width": 1936,
+    "height": 55,
+    "fontSize": 41,
+    "bold": false,
+    "align": "left"
+  },
+  "D30": {
+    "key": "vehicle_sts",
+    "x": 444,
+    "y": 1991,
+    "width": 1936,
+    "height": 55,
+    "fontSize": 41,
+    "bold": false,
+    "align": "left"
+  },
+  "D31": {
+    "key": "vehicle_plate",
+    "x": 444,
+    "y": 2047,
+    "width": 1936,
+    "height": 55,
+    "fontSize": 41,
+    "bold": false,
+    "align": "left"
+  },
+  "D34": {
+    "key": "price",
+    "x": 444,
+    "y": 2444,
+    "width": 489,
+    "height": 68,
+    "fontSize": 49,
+    "bold": false,
+    "align": "center"
+  },
+  "G43": {
+    "key": "seller_full_name",
+    "x": 933,
+    "y": 3127,
+    "width": 1447,
+    "height": 62,
+    "fontSize": 41,
+    "bold": false,
+    "align": "center"
+  },
+  "G46": {
+    "key": "buyer_full_name",
+    "x": 933,
+    "y": 3299,
+    "width": 1447,
+    "height": 62,
+    "fontSize": 41,
+    "bold": false,
+    "align": "center"
+  }
+}

@@ -546,7 +546,7 @@ def make_contract(deal_id: int) -> dict[str, Any]:
     except Exception as exc:
         raise HTTPException(500, f"Не удалось создать готовые файлы: {exc}") from exc
     return {
-        "template": "MyFiles/BAZA.xlsx",
+        "template": "MyFiles/BAZA.xls",
         "files": [_generated_file_payload(item) for item in stored_files],
     }
 
