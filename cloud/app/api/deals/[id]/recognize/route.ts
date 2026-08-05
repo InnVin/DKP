@@ -30,7 +30,7 @@ function identitySignature(fields: Partial<DealData>) {
 function mergeResults(payload: ModelPayload, docs: DocRow[]) {
   const modelDocuments = Array.isArray(payload.documents) ? payload.documents : [];
   if (!modelDocuments.length) {
-    return { fields: sanitizeRecognizedFields(payload), conflicts: [] as OcrConflict[] };
+    return { fields: {}, conflicts: [] as OcrConflict[] };
   }
 
   const parsed = modelDocuments.map((item, modelIndex) => {

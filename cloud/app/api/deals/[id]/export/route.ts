@@ -7,7 +7,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const owner = await ownerId();
   const row = await bindings().DB.prepare("SELECT data_json FROM deals WHERE id = ? AND owner_id = ? AND deleted_at IS NULL").bind(id, owner).first<{ data_json: string }>();
   if (!row) return Response.json({ error: "Договор не найден" }, { status: 404 });
-  const source = await fetch(new URL("/templates/BAZA.xls", request.url));
+  const source = await bindings().ASSETS.fetch(new Request(new URL("/templates/BAZA.xls", request.url)));
   if (!source.ok) return Response.json({ error: "Шаблон BAZA.xls недоступен" }, { status: 500 });
   const deal = JSON.parse(row.data_json);
   const bytes = writeXlsx(fillContractWorkbook(readXls(await source.arrayBuffer()), deal));

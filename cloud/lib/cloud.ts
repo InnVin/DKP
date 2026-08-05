@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { headers } from "next/headers";
 
 export type Bindings = {
+  ASSETS: Fetcher;
   DB: D1Database;
   FILES: R2Bucket;
   IMAGES?: {
