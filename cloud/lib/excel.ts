@@ -28,8 +28,8 @@ export function fillContractWorkbook(workbook: XLSX.WorkBook, deal: Deal) {
   return workbook;
 }
 
-export function writeXls(workbook: XLSX.WorkBook) {
-  return XLSX.write(workbook, { type: "array", bookType: "xls", cellStyles: true, compression: true }) as ArrayBuffer;
+export function writeXlsx(workbook: XLSX.WorkBook) {
+  return XLSX.write(workbook, { type: "array", bookType: "xlsx", cellStyles: true, compression: true }) as ArrayBuffer;
 }
 
 export function readXls(bytes: ArrayBuffer) {

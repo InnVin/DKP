@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
-import { buildDatabaseWorkbook, fillContractWorkbook, readXls, writeXls } from "../lib/excel.ts";
+import { buildDatabaseWorkbook, fillContractWorkbook, readXls, writeXlsx } from "../lib/excel.ts";
 
 test("BAZA.xls сохраняет карту ячеек и печатную область", async () => {
   const source = await fs.readFile(path.resolve("..", "MyFiles", "BAZA.xls"));
@@ -18,7 +18,11 @@ test("BAZA.xls сохраняет карту ячеек и печатную об
   assert.equal(sheet.D29.v, "25 ОК 951091"); assert.equal(sheet.D30.v, "99 66 601015"); assert.equal(sheet.D31.v, "В831ЕТ14");
   assert.equal(sheet["!printArea"], "A1:J47"); assert.equal(sheet["!pageSetup"].fitToWidth, 1); assert.equal(sheet["!pageSetup"].fitToHeight, 1);
   for (const row of [13, 19]) for (const column of "ABCDEFGHIJ") assert.equal(sheet[`${column}${row}`]?.v || "", "");
-  const result = writeXls(workbook); assert.ok(result.byteLength > 8_000); assert.equal(new Uint8Array(result)[0], 0xd0);
+  const result = writeXlsx(workbook);
+  assert.ok(result.byteLength > 8_000);
+  assert.deepEqual([...new Uint8Array(result).subarray(0, 4)], [0x50, 0x4b, 0x03, 0x04]);
+  const reopened = readXls(result);
+  assert.equal(reopened.Sheets[reopened.SheetNames[0]].D22.v, "TOYOTA LAND CRUISER 200");
 });
 
 test("единая книга содержит четыре правильных листа", async () => {

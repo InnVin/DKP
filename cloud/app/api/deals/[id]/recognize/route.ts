@@ -1,5 +1,6 @@
 import { bindings, ensureSchema, json, ownerId } from "../../../../../lib/cloud";
 import { type DealData, type OcrConflict, sanitizeRecognizedFields } from "../../../../../lib/deal-data";
+import { parseModelJson } from "../../../../../lib/model-json";
 import { queueAndFlushDeal } from "../../../../../lib/supabase";
 
 type DocRow = { id: string; object_key: string; content_type: string; document_type: string; filename: string };
@@ -15,18 +16,6 @@ function base64(bytes: Uint8Array) {
   let binary = "";
   for (let index = 0; index < bytes.length; index += 0x8000) binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
   return btoa(binary);
-}
-
-function parseModel(value: unknown): ModelPayload {
-  const text = typeof value === "string"
-    ? value
-    : Array.isArray(value)
-      ? value.map(item => typeof item?.text === "string" ? item.text : "").join("")
-      : "";
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start < 0 || end <= start) throw new Error("Сервис распознавания вернул неверный формат");
-  return JSON.parse(text.slice(start, end + 1));
 }
 
 function identitySignature(fields: Partial<DealData>) {
@@ -127,16 +116,29 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
     content.push({ type: "text", text: `Документ ${index + 1}. Категория загрузки: ${doc.document_type}. Имя файла: ${doc.filename}` });
     content.push({ type: "image_url", image_url: { url: `data:${doc.content_type};base64,${base64(bytes)}` } });
   }
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "HTTP-Referer": "https://dkp-app.innvinjapan.chatgpt.site", "X-Title": "АвтоДоговор Cloud" },
-    body: JSON.stringify({ model: "qwen/qwen3-vl-32b-instruct", temperature: 0, messages: [{ role: "user", content }] }),
-  });
-  if (!response.ok) return json({ error: `OCR временно недоступен (${response.status})` }, { status: 502 });
-  const result = (await response.json()) as { choices?: Array<{ message?: { content?: unknown } }> };
-  let modelPayload: ModelPayload;
-  try { modelPayload = parseModel(result.choices?.[0]?.message?.content); }
-  catch (error) { return json({ error: error instanceof Error ? error.message : "Не удалось разобрать OCR" }, { status: 502 }); }
+  let modelPayload: ModelPayload | undefined;
+  let parseError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const retryContent = attempt === 0 ? content : [
+      ...content,
+      { type: "text", text: "Предыдущий ответ содержал синтаксическую ошибку. Повтори распознавание и верни только один корректный JSON-объект без Markdown." },
+    ];
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "HTTP-Referer": "https://dkp-app.innvinjapan.chatgpt.site", "X-Title": "АвтоДоговор Cloud" },
+      body: JSON.stringify({ model: "qwen/qwen3-vl-32b-instruct", temperature: 0, response_format: { type: "json_object" }, messages: [{ role: "user", content: retryContent }] }),
+    });
+    if (!response.ok) return json({ error: `OCR временно недоступен (${response.status})` }, { status: 502 });
+    const result = (await response.json()) as { choices?: Array<{ message?: { content?: unknown } }> };
+    try {
+      modelPayload = parseModelJson<ModelPayload>(result.choices?.[0]?.message?.content);
+      parseError = undefined;
+      break;
+    } catch (error) {
+      parseError = error;
+    }
+  }
+  if (!modelPayload) return json({ error: parseError instanceof Error ? parseError.message : "Не удалось разобрать OCR" }, { status: 502 });
   const recognized = mergeResults(modelPayload, docs);
   const current = JSON.parse(deal.data_json);
   const merged = { ...current, ...recognized.fields, ocr_conflicts: recognized.conflicts };

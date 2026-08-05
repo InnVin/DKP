@@ -1,5 +1,5 @@
 import { bindings, ensureSchema, ownerId } from "@/lib/cloud";
-import { buildDatabaseWorkbook, readXls, writeXls } from "@/lib/excel";
+import { buildDatabaseWorkbook, readXls, writeXlsx } from "@/lib/excel";
 
 export async function GET(request: Request) {
   await ensureSchema();
@@ -9,5 +9,5 @@ export async function GET(request: Request) {
   const source = await fetch(new URL("/templates/BAZA.xls", request.url));
   if (!source.ok) return Response.json({ error: "Шаблон BAZA.xls недоступен" }, { status: 500 });
   const workbook = buildDatabaseWorkbook(readXls(await source.arrayBuffer()), deals.filter(item => !item.deleted_at), deals.filter(item => item.deleted_at));
-  return new Response(writeXls(workbook), { headers: { "Content-Type": "application/vnd.ms-excel", "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent("АвтоДоговор_База.xls")}` } });
+  return new Response(writeXlsx(workbook), { headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent("АвтоДоговор_База.xlsx")}` } });
 }
