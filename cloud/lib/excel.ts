@@ -105,10 +105,10 @@ function yearValue(value: unknown) {
 function databaseRow(deal: DealWithSelector, deleted: boolean) {
   return [
     deal.__selector,
-    deal.seller_full_name, deal.seller_passport, deal.seller_passport_issued, dateValue(deal.seller_passport_issue_date), deal.seller_address,
-    deal.buyer_full_name, deal.buyer_passport, deal.buyer_passport_issued, dateValue(deal.buyer_passport_issue_date), deal.buyer_address,
+    deal.seller_full_name, deal.seller_passport, deal.seller_passport_issued, formatRussianDate(deal.seller_passport_issue_date), deal.seller_address,
+    deal.buyer_full_name, deal.buyer_passport, deal.buyer_passport_issued, formatRussianDate(deal.buyer_passport_issue_date), deal.buyer_address,
     deal.vehicle_make_model, deal.vehicle_category, yearValue(deal.vehicle_year), deal.vehicle_vin, deal.vehicle_body, deal.vehicle_chassis, deal.vehicle_color,
-    deal.vehicle_pts, deal.vehicle_sts, deal.vehicle_plate, deal.price, dateValue(deal.contract_date),
+    deal.vehicle_pts, deal.vehicle_sts, deal.vehicle_plate, deal.price, formatRussianDate(deal.contract_date),
     dateValue(deal.created_at), deal.contract_place, deal.seller_phone, deal.buyer_phone, deal.notes, dateValue(deal.updated_at),
     deleted ? "Удалён" : "Действующий", deleted ? dateValue(deal.deleted_at) : "",
   ].map(value => value ?? "");
@@ -166,19 +166,101 @@ function setFormula(sheet: XLSX.WorkSheet, address: string, formula: string, cac
   sheet[address] = { ...valueCell, f: formula };
 }
 
+type CellStyle = {
+  font?: Record<string, unknown>;
+  alignment?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
+function styleCell(sheet: XLSX.WorkSheet, address: string, changes: CellStyle) {
+  const cell = (sheet[address] || { t: "s", v: "" }) as XLSX.CellObject;
+  const current = cell.s && typeof cell.s === "object" ? cell.s as CellStyle : {};
+  cell.s = {
+    ...current,
+    ...changes,
+    font: { ...(current.font || {}), ...(changes.font || {}) },
+    alignment: { ...(current.alignment || {}), ...(changes.alignment || {}) },
+  } as XLSX.CellStyle;
+  sheet[address] = cell;
+}
+
+function clearContractRow(sheet: XLSX.WorkSheet, row: number) {
+  for (let column = 0; column < 10; column += 1) {
+    const address = XLSX.utils.encode_cell({ r: row - 1, c: column });
+    const cell = { ...(sheet[address] || {}), t: "s", v: "", w: "" } as XLSX.CellObject;
+    delete cell.f;
+    sheet[address] = cell;
+  }
+}
+
+function mergedWidth(sheet: XLSX.WorkSheet, row: number, column: number) {
+  const merge = (sheet["!merges"] || []).find(range => range.s.r === row && range.s.c === column);
+  const lastColumn = merge?.e.c ?? column;
+  let width = 0;
+  for (let index = column; index <= lastColumn; index += 1) width += sheet["!cols"]?.[index]?.wch || 10;
+  return Math.max(8, width);
+}
+
+function isMergedContinuation(sheet: XLSX.WorkSheet, row: number, column: number) {
+  return (sheet["!merges"] || []).some(range => row >= range.s.r && row <= range.e.r && column >= range.s.c && column <= range.e.c && (row !== range.s.r || column !== range.s.c));
+}
+
+function fitContractRows(sheet: XLSX.WorkSheet) {
+  const rows = [...(sheet["!rows"] || [])];
+  for (let row = 0; row < 47; row += 1) {
+    let requiredLines = 1;
+    for (let column = 0; column < 10; column += 1) {
+      if (isMergedContinuation(sheet, row, column)) continue;
+      const cell = sheet[XLSX.utils.encode_cell({ r: row, c: column })];
+      const value = String(cell?.v ?? "");
+      if (!value) continue;
+      const capacity = Math.max(8, Math.floor(mergedWidth(sheet, row, column) * 1.35));
+      const lines = value.split(/\r?\n/).reduce((total, line) => total + Math.max(1, Math.ceil(line.length / capacity)), 0);
+      requiredLines = Math.max(requiredLines, lines);
+    }
+    const existing = rows[row]?.hpt || (rows[row]?.hpx ? rows[row]!.hpx! * .75 : 15);
+    rows[row] = { ...(rows[row] || {}), hpt: Math.min(105, Math.max(existing, requiredLines * 14.5 + 2)) };
+  }
+  for (const row of [13, 19]) rows[row - 1] = { ...(rows[row - 1] || {}), hpt: 15 };
+  sheet["!rows"] = rows;
+}
+
+function applyContractFormatting(sheet: XLSX.WorkSheet) {
+  clearContractRow(sheet, 13);
+  clearContractRow(sheet, 19);
+  for (let row = 0; row < 47; row += 1) for (let column = 0; column < 10; column += 1) {
+    styleCell(sheet, XLSX.utils.encode_cell({ r: row, c: column }), {
+      font: { name: "Times New Roman" },
+      alignment: { wrapText: true },
+    });
+  }
+  for (const row of [2, 4, 5]) for (let column = 0; column < 10; column += 1) {
+    styleCell(sheet, XLSX.utils.encode_cell({ r: row - 1, c: column }), { alignment: { horizontal: "center" } });
+  }
+  for (const address of ["H10", "H16", "D24", "H24"]) styleCell(sheet, address, { alignment: { horizontal: "left" } });
+  for (const address of ["A1", "G10", "G16", "G34"]) styleCell(sheet, address, { alignment: { horizontal: "right" } });
+  for (const address of ["B9", "B15", "D34", "G43", "G46"]) styleCell(sheet, address, { font: { bold: true } });
+  fitContractRows(sheet);
+  sheet["!ref"] = "A1:J47";
+  if (sheet["!cols"]) sheet["!cols"] = sheet["!cols"]!.slice(0, 10);
+  sheet["!margins"] = { left: .25, right: .25, top: .3, bottom: .3, header: 0, footer: 0 };
+  sheet["!printArea"] = "A1:J47";
+  sheet["!pageSetup"] = { ...(sheet["!pageSetup"] || {}), orientation: "portrait", paperSize: 9, fitToWidth: 1, fitToHeight: 1 };
+}
+
 function configureContractSheet(workbook: XLSX.WorkBook, active: DealWithSelector[]) {
   const sheet = workbook.Sheets["ДКП"];
   if (!sheet) throw new Error("В шаблоне отсутствует лист ДКП");
   const selected = active[0];
   const row = selected ? databaseRow(selected, false) : [];
+  const lastDatabaseRow = Math.max(2, active.length + 1);
   sheet.I1 = styledCell(sheet.I1, selected?.__selector || "", 9);
   for (const [address, column] of Object.entries(formulaColumns)) {
-    setFormula(sheet, address, `IFERROR(VLOOKUP($I$1,'База'!$A$1:$AE$65536,${column},0),"")`, formulaCachedValue(row, column));
+    setFormula(sheet, address, `IFERROR(VLOOKUP($I$1,'База'!$A$1:$AE$${lastDatabaseRow},${column},0),"")`, formulaCachedValue(row, column));
   }
   setFormula(sheet, "G43", "B9", formulaCachedValue(row, 2));
   setFormula(sheet, "G46", "B15", formulaCachedValue(row, 7));
-  sheet["!printArea"] = "A1:J47";
-  sheet["!pageSetup"] = { ...(sheet["!pageSetup"] || {}), orientation: "portrait", paperSize: 9, fitToWidth: 1, fitToHeight: 1 };
+  applyContractFormatting(sheet);
 }
 
 function fixBlankSheet(sheet: XLSX.WorkSheet | undefined) {
@@ -202,6 +284,62 @@ function ensureWorkbookNames(workbook: XLSX.WorkBook, selectorLastRow: number) {
   workbook.Workbook = { ...(workbook.Workbook || {}), Names: names, CalcPr: { calcMode: "auto", fullCalcOnLoad: true, forceFullCalc: true } };
 }
 
+function injectContractStyles(stylesXml: string) {
+  let regularFontId = 1;
+  let boldFontId = 2;
+  const contractDateFormatId = 172;
+  let xml = stylesXml.replace(/<numFmts count="(\d+)">([\s\S]*?)<\/numFmts>/, (_match, count, body) => {
+    const cleaned = String(body).replace(new RegExp(`<numFmt numFmtId="${contractDateFormatId}"[^>]*/>`), "");
+    return `<numFmts count="${Number(count) + 1}">${cleaned}<numFmt numFmtId="${contractDateFormatId}" formatCode="dd.mm.yyyy"/></numFmts>`;
+  });
+  xml = xml.replace(/<fonts count="(\d+)">([\s\S]*?)<\/fonts>/, (_match, count, body) => {
+    regularFontId = Number(count);
+    boldFontId = regularFontId + 1;
+    const regular = '<font><name val="Times New Roman"/><family val="1"/><sz val="12"/></font>';
+    const bold = '<font><b/><name val="Times New Roman"/><family val="1"/><sz val="12"/></font>';
+    return `<fonts count="${Number(count) + 2}">${body}${regular}${bold}</fonts>`;
+  });
+  const ids = { wrap: 0, center: 0, left: 0, right: 0, bold: 0, dateLeft: 0, dateCenter: 0 };
+  xml = xml.replace(/<cellXfs count="(\d+)">([\s\S]*?)<\/cellXfs>/, (_match, count, body) => {
+    const first = Number(count);
+    Object.assign(ids, { wrap: first, center: first + 1, left: first + 2, right: first + 3, bold: first + 4, dateLeft: first + 5, dateCenter: first + 6 });
+    const xf = (fontId: number, alignment: string, numFmtId = 0) => `<xf numFmtId="${numFmtId}" fontId="${fontId}" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"${numFmtId ? ' applyNumberFormat="1"' : ""}><alignment wrapText="1"${alignment}/></xf>`;
+    const additions = [
+      xf(regularFontId, ""), xf(regularFontId, ' horizontal="center"'), xf(regularFontId, ' horizontal="left"'),
+      xf(regularFontId, ' horizontal="right"'), xf(boldFontId, ""), xf(regularFontId, ' horizontal="left"', contractDateFormatId),
+      xf(regularFontId, ' horizontal="center"', contractDateFormatId),
+    ].join("");
+    return `<cellXfs count="${first + 7}">${body}${additions}</cellXfs>`;
+  });
+  return { xml, ids };
+}
+
+function cellStyleId(address: string, ids: ReturnType<typeof injectContractStyles>["ids"]) {
+  const row = Number(address.match(/\d+$/)?.[0] || 0);
+  if (["B9", "B15", "D34", "G43", "G46"].includes(address)) return ids.bold;
+  if (["H10", "H16"].includes(address)) return ids.dateLeft;
+  if (address === "J4") return ids.dateCenter;
+  if (["D24", "H24"].includes(address)) return ids.left;
+  if (["A1", "G10", "G16", "G34"].includes(address)) return ids.right;
+  if ([2, 4, 5].includes(row)) return ids.center;
+  return ids.wrap;
+}
+
+function setXmlCellStyle(xml: string, address: string, styleId: number) {
+  const pattern = new RegExp(`<c\\b([^>]*\\br="${address}"[^>]*)>`, "g");
+  if (pattern.test(xml)) return xml.replace(pattern, (_match, attributes) => `<c${String(attributes).replace(/\s+s="\d+"/g, "")} s="${styleId}">`);
+  const row = address.match(/\d+$/)?.[0];
+  if (!row) return xml;
+  return xml.replace(new RegExp(`(<row\\b[^>]*\\br="${row}"[^>]*>[\\s\\S]*?)(</row>)`), `$1<c r="${address}" s="${styleId}"/>$2`);
+}
+
+function applyContractStylesXml(xml: string, ids: ReturnType<typeof injectContractStyles>["ids"]) {
+  xml = xml.replace(/<col\b([^>]*\bmin="(\d+)"[^>]*)\/>/g, (match, attributes, minimum) => Number(minimum) <= 10 ? `<col${String(attributes).replace(/\s+style="\d+"/g, "")} style="${ids.wrap}"/>` : match);
+  xml = xml.replace(/<c\b([^>]*\br="([A-J]\d+)"[^>]*)>/g, (_match, attributes, address) => `<c${String(attributes).replace(/\s+s="\d+"/g, "")} s="${cellStyleId(address, ids)}">`);
+  for (const address of ["H24", "G10", "G16", "G34"]) xml = setXmlCellStyle(xml, address, cellStyleId(address, ids));
+  return xml;
+}
+
 export function buildDatabaseWorkbook(template: XLSX.WorkBook, activeDeals: Deal[], deletedDeals: Deal[]) {
   const baseTemplate = template.Sheets["База"];
   if (!baseTemplate || !template.Sheets["Пуст"]) throw new Error("Шаблон должен содержать листы ДКП, База и Пуст");
@@ -223,10 +361,15 @@ function injectSelectorValidation(bytes: ArrayBuffer) {
   const sheetPath = "xl/worksheets/sheet1.xml";
   const source = archive[sheetPath];
   if (!source) return bytes;
-  let xml = strFromU8(source).replace(/<dataValidations\b[\s\S]*?<\/dataValidations>/g, "");
+  const styled = injectContractStyles(strFromU8(archive["xl/styles.xml"]));
+  archive["xl/styles.xml"] = strToU8(styled.xml);
+  let xml = applyContractStylesXml(strFromU8(source), styled.ids).replace(/<dataValidations\b[\s\S]*?<\/dataValidations>/g, "");
+  xml = xml.replace(/<pageMargins\b[^>]*\/>/g, "").replace(/<pageSetup\b[^>]*\/>/g, "");
+  if (!xml.includes("<sheetPr")) xml = xml.replace(/(<worksheet\b[^>]*>)/, '$1<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>');
   const validation = '<dataValidations count="1"><dataValidation type="list" allowBlank="1" showErrorMessage="1" sqref="I1"><formula1>ContractSelectors</formula1></dataValidation></dataValidations>';
-  const marker = ["<hyperlinks", "<printOptions", "<pageMargins", "<pageSetup", "<drawing", "</worksheet>"].find(item => xml.includes(item)) || "</worksheet>";
-  xml = xml.replace(marker, `${validation}${marker}`);
+  const printSettings = '<pageMargins left="0.25" right="0.25" top="0.3" bottom="0.3" header="0" footer="0"/><pageSetup paperSize="9" orientation="portrait" fitToWidth="1" fitToHeight="1"/>';
+  const marker = ["<hyperlinks", "<drawing", "<legacyDrawing", "</worksheet>"].find(item => xml.includes(item)) || "</worksheet>";
+  xml = xml.replace(marker, `${validation}${printSettings}${marker}`);
   archive[sheetPath] = strToU8(xml);
   const result = zipSync(archive, { level: 6 });
   return result.buffer.slice(result.byteOffset, result.byteOffset + result.byteLength) as ArrayBuffer;

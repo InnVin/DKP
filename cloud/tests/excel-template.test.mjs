@@ -30,7 +30,7 @@ test("единая книга сохраняет связь База → ДКП 
   const source = await fs.readFile(path.resolve("public", "templates", "MyTemplate.xls"));
   const template = readWorkbook(source.buffer.slice(source.byteOffset, source.byteOffset + source.byteLength));
   const active = [
-    { id: "aaaaaaaa-1111", contract_number: "7", contract_place: "Якутск", contract_date: "2026-08-05", seller_full_name: "Продавец 1", seller_passport_issue_date: "2015-09-17", seller_phone: "+79990000001", buyer_full_name: "Покупатель 1", buyer_phone: "+79990000002", vehicle_make_model: "TOYOTA 1", vehicle_year: "2008", created_at: 1785910000000, updated_at: 1785911000000 },
+    { id: "aaaaaaaa-1111", contract_number: "7", contract_place: "Якутск", contract_date: "2026-08-05", seller_full_name: "Продавец 1", seller_passport_issue_date: "2015-09-17", seller_address: "ДЛИННЫЙ АДРЕС ПРОДАВЦА ДЛЯ ПРОВЕРКИ АВТОМАТИЧЕСКОЙ ВЫСОТЫ СТРОКИ И ПЕРЕНОСА ТЕКСТА", seller_phone: "+79990000001", buyer_full_name: "Покупатель 1", buyer_phone: "+79990000002", vehicle_make_model: "TOYOTA 1", vehicle_year: "2008", created_at: 1785910000000, updated_at: 1785911000000 },
     { id: "bbbbbbbb-2222", contract_number: "7", seller_full_name: "Продавец 2", vehicle_make_model: "TOYOTA 2", vehicle_year: "2009", created_at: 1785920000000, updated_at: 1785921000000 },
     { id: "cccccccc-3333", contract_number: "", seller_full_name: "Без номера", created_at: 1785930000000, updated_at: 1785931000000 },
   ];
@@ -46,17 +46,40 @@ test("единая книга сохраняет связь База → ДКП 
   assert.equal(workbook.Sheets["Удалённые"].A2.v, "6");
   assert.equal(workbook.Sheets["ДКП"].I1.v, "7-AAAAAAAA");
   assert.match(workbook.Sheets["ДКП"].B9.f, /VLOOKUP\(\$I\$1,'База'/);
+  assert.match(workbook.Sheets["ДКП"].B9.f, /\$AE\$4/);
   assert.match(workbook.Sheets["ДКП"].D24.f, /,14,0\)/);
   assert.match(workbook.Sheets["ДКП"].J10.f, /,26,0\)/);
-  assert.equal(workbook.Sheets["ДКП"].H10.z, "dd.mm.yyyy");
+  assert.match(workbook.Sheets["ДКП"].H10.z, /dd.*mm.*yyyy/);
   assert.equal(workbook.Sheets["ДКП"]["!printArea"], "A1:J47");
+  const contract = workbook.Sheets["ДКП"];
+  for (const row of [13, 19]) for (const column of "ABCDEFGHIJ") {
+    assert.equal(contract[`${column}${row}`]?.v || "", "");
+    assert.equal(contract[`${column}${row}`]?.f, undefined);
+  }
+  assert.equal(contract.A1.s.font.name, "Times New Roman");
+  assert.equal(contract.A1.s.alignment.wrapText, true);
+  assert.equal(contract.A2.s.alignment.horizontal, "center");
+  assert.equal(contract.H10.s.alignment.horizontal, "left");
+  assert.equal(contract.H16.s.alignment.horizontal, "left");
+  assert.equal(contract.D24.s.alignment.horizontal, "left");
+  for (const address of ["A1", "G10", "G16", "G34"]) assert.equal(contract[address].s.alignment.horizontal, "right");
+  for (const address of ["B9", "B15", "D34", "G43", "G46"]) assert.equal(contract[address].s.font.bold, true);
+  assert.ok(contract["!rows"][11].hpt >= 28.5);
+  assert.equal(contract["!pageSetup"].paperSize, 9);
+  assert.equal(contract["!pageSetup"].fitToWidth, 1);
+  assert.equal(contract["!pageSetup"].fitToHeight, 1);
   for (const sheet of workbook.SheetNames) for (const cell of Object.values(workbook.Sheets[sheet])) {
     if (cell && typeof cell === "object" && "f" in cell) assert.doesNotMatch(cell.f, /#REF!/);
   }
   const bytes = writeDatabaseXlsx(workbook);
   assert.deepEqual([...new Uint8Array(bytes).subarray(0, 4)], [0x50, 0x4b, 0x03, 0x04]);
   const archive = unzipSync(new Uint8Array(bytes));
-  assert.match(strFromU8(archive["xl/worksheets/sheet1.xml"]), /dataValidation[^>]+sqref="I1"/);
+  const contractXml = strFromU8(archive["xl/worksheets/sheet1.xml"]);
+  assert.match(contractXml, /dataValidation[^>]+sqref="I1"/);
+  assert.match(contractXml, /pageSetup[^>]+paperSize="9"/);
+  assert.match(contractXml, /pageSetup[^>]+fitToWidth="1"/);
+  assert.match(contractXml, /pageSetup[^>]+fitToHeight="1"/);
+  assert.match(strFromU8(archive["xl/styles.xml"]), /Times New Roman/);
   const reopened = readWorkbook(bytes);
   assert.deepEqual(reopened.SheetNames, ["ДКП", "База", "Удалённые", "Пуст"]);
   assert.equal(reopened.Sheets["База"].A2.v, "7-AAAAAAAA");
