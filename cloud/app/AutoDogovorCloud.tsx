@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ReactNode } from "react";
 import { PDFDocument, PageSizes } from "pdf-lib";
-import { Archive, Camera, ChevronRight, Download, Eraser, FileImage, FileSpreadsheet, FileText, ImagePlus, Moon, RotateCcw, Save, ScanLine, Sun, Trash2, TriangleAlert } from "lucide-react";
+import { Archive, Camera, ChevronRight, Download, Eraser, FileImage, FileSpreadsheet, FileText, ImagePlus, Moon, RotateCcw, Save, ScanLine, Sun, Trash2, TriangleAlert, Upload } from "lucide-react";
 
 type Conflict = { field: string; message: string; sources?: string[] };
 type Deal = Record<string, unknown> & { id: string; ocr_conflicts?: Conflict[] };
@@ -82,6 +82,17 @@ export default function AutoDogovorCloud() {
     catch (error) { notify(error instanceof Error ? error.message : "Ошибка загрузки"); }
     finally { setBusy(false); }
   }
+  async function importDeals(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]; event.target.value = ""; if (!file) return;
+    setBusy(true);
+    try {
+      const body = new FormData(); body.append("file", file);
+      const result = await api("/api/deals/import", { method: "POST", body });
+      const refreshed = await api("/api/deals"); setDeals(refreshed.deals); setArchive(true);
+      notify(`Импортировано: ${result.imported}. Пропущено повторов: ${result.skipped}`);
+    } catch (error) { notify(error instanceof Error ? error.message : "Ошибка импорта Excel"); }
+    finally { setBusy(false); }
+  }
   function removeDocument(item: DocumentItem) { setDocuments(items => items.filter(doc => doc.id !== item.id)); delayed("Фотография будет удалена", () => { void api(`/api/deals/${deal.id}/documents/${item.id}`, { method: "DELETE" }); }, () => setDocuments(items => [...items, item])); }
   async function recognize() { if (!documents.length) return notify("Сначала загрузите фотографии"); setBusy(true); try { const data = await api(`/api/deals/${deal.id}/recognize`, { method: "POST" }); setDeal(data.deal); setDeals(items => items.map(item => item.id === deal.id ? data.deal : item)); notify(data.conflicts?.length ? "Данные распознаны. Проверьте жёлтые поля" : "Распознавание завершено"); setStep(1); } catch (error) { notify(error instanceof Error ? error.message : "Ошибка OCR"); } finally { setBusy(false); } }
   function removeDeal(item: Deal) { setDeals(items => items.filter(current => current.id !== item.id)); delayed("Договор будет удалён", () => { void api(`/api/deals/${item.id}`, { method: "DELETE" }); }, () => setDeals(items => [item, ...items])); }
@@ -96,7 +107,7 @@ export default function AutoDogovorCloud() {
     {!archive && step === 1 && <section className="workspace"><Title title="Данные договора" text="Жёлтым отмечены сведения из конфликтующих документов."><button className="secondary" onClick={() => void save()}><Save/> Сохранить</button></Title><Section title="Договор" fields={contractFields} deal={deal} update={update}/><div className="people-grid"><Section title="Продавец" fields={sellerFields} deal={deal} update={update} onClear={() => clearSection(sellerFields, "Продавец")}/><Section title="Покупатель" fields={buyerFields} deal={deal} update={update} onClear={() => clearSection(buyerFields, "Покупатель")}/></div><Section title="Автомобиль" fields={vehicleFields} deal={deal} update={update} columns onClear={() => clearSection(vehicleFields, "Автомобиль")}/><section className="card data-section"><label className="field wide"><span>Заметки</span><textarea value={val(deal, "notes")} onChange={event => update("notes", event.target.value)} onBlur={() => void save()}/></label></section></section>}
     {!archive && step === 2 && <section className="workspace review"><Title title="Готовые файлы" text="Excel заполняется по BAZA.xls; PDF — одна страница A4; JPEG — 2480×3508."/><div className="preview-paper"><h2>ДОГОВОР КУПЛИ-ПРОДАЖИ АВТОМОБИЛЯ</h2><p>{val(deal, "seller_full_name")} → {val(deal, "buyer_full_name")}</p><p>{val(deal, "vehicle_make_model")} · {val(deal, "vehicle_vin")}</p></div><div className="ready-actions"><button onClick={() => downloadUrl(`/api/deals/${deal.id}/export`)}><FileSpreadsheet/> Excel</button><button onClick={() => void exportImage("pdf")}><FileText/> PDF</button><button onClick={() => void exportImage("jpeg")}><FileImage/> JPEG</button></div></section>}
     {!archive && <button className="next-button" onClick={() => setStep(current => Math.min(2, current + 1))}>Далее <ChevronRight/></button>}
-    {archive && <section className="workspace"><Title title="Архив ДКП" text="Все действующие договоры и фотографии хранятся отдельно."><button className="secondary" onClick={() => downloadUrl("/api/deals/export")}><Download/> Единая база Excel</button></Title><div className="archive-grid">{deals.map(item => <article className="card archive-card" key={item.id}><div><b>ДКП № {val(item, "contract_number") || "без номера"}</b><small>{formatDate(item.contract_date)} · {val(item, "seller_full_name") || "продавец не указан"}</small><small>{val(item, "vehicle_make_model") || "автомобиль не указан"} · {val(item, "vehicle_plate") || val(item, "vehicle_vin")}</small></div><footer><button className="danger" onClick={() => removeDeal(item)}><Trash2/> Удалить</button><button className="primary" onClick={() => void openDeal(item.id)}>Открыть <ChevronRight/></button></footer></article>)}</div></section>}
+    {archive && <section className="workspace"><Title title="Архив ДКП" text="Все действующие договоры и фотографии хранятся отдельно."><div className="archive-actions"><label className={`secondary import-button ${busy ? "disabled" : ""}`}><Upload/> Импорт Excel<input type="file" accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" disabled={busy} onChange={event => void importDeals(event)}/></label><button className="secondary" onClick={() => downloadUrl("/api/deals/export")}><Download/> Единая база Excel</button></div></Title><div className="archive-grid">{deals.map(item => <article className="card archive-card" key={item.id}><div><b>ДКП № {val(item, "contract_number") || "без номера"}</b><small>{formatDate(item.contract_date)} · {val(item, "seller_full_name") || "продавец не указан"}</small><small>{val(item, "vehicle_make_model") || "автомобиль не указан"} · {val(item, "vehicle_plate") || val(item, "vehicle_vin")}</small></div><footer><button className="danger" onClick={() => removeDeal(item)}><Trash2/> Удалить</button><button className="primary" onClick={() => void openDeal(item.id)}>Открыть <ChevronRight/></button></footer></article>)}</div></section>}
     <nav className="bottom-nav"><button className={!archive ? "active" : ""} onClick={() => setArchive(false)}><FileText/><span>ДКП</span></button><button className={archive ? "active" : ""} onClick={() => setArchive(true)}><Archive/><span>Архив</span></button></nav>
     {toast && <div className="toast"><span>{toast.message}</span>{toast.undo && <button onClick={toast.undo}><RotateCcw/> Вернуть</button>}</div>}
   </main>;
